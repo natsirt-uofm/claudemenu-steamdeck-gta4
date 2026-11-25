@@ -3,7 +3,7 @@
 # GTA IV Downgrader, ScriptHook and ScriptHookDotNet can run.
 #
 # Run it in Desktop Mode, from Konsole, with the game closed:
-#     bash scripts/steamdeck-setup.sh
+#     bash tools/steamdeck-setup.sh
 #
 # What it does. Each step checks first and is skipped if it's already done,
 # so it is safe to run again:

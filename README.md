@@ -50,16 +50,16 @@ Before you start:
 
 ### Quick way: the setup script
 
-`scripts/steamdeck-setup.sh` does steps 1 and 3–5 for you and then prints the commands for steps 6 and 7. You still do step 2 by hand first. Download this repository (Code → Download ZIP), extract it, open Konsole in the extracted folder, and run:
+`tools/steamdeck-setup.sh` does steps 1 and 3–5 for you and then prints the commands for steps 6 and 7. You still do step 2 by hand first. Download this repository (Code → Download ZIP), extract it, open Konsole in the extracted folder, and run:
 
 ```
-bash scripts/steamdeck-setup.sh --dry-run
+bash tools/steamdeck-setup.sh --dry-run
 ```
 
 That shows what it would do without changing anything. If it looks right, run it for real:
 
 ```
-bash scripts/steamdeck-setup.sh
+bash tools/steamdeck-setup.sh
 ```
 
 It finds the library that holds GTA IV from Steam's `libraryfolders.vdf`, prints free space, skips any step that's already done (so you can run it again safely), and stops with an explanation if something is wrong. It does **not** run the Downgrader. `--help` lists the options, including `--reset-prefix` (backs up your saves, then empties a broken prefix).
@@ -134,7 +134,7 @@ It finds the library that holds GTA IV from Steam's `libraryfolders.vdf`, prints
    - Tick the **ASI loader**, **ScriptHook** and **ScriptHookDotNet**
 
 7. **Install ClaudeMenu.**
-   - Copy `scripts/ClaudeMenu.cs` (or a built `ClaudeMenu.net.dll`, see below) and `scripts/ClaudeMenu.ini` into the game's `scripts` folder, next to `GTAIV.exe`: `/run/media/deck/<uuid>/steamapps/common/Grand Theft Auto IV/GTAIV/scripts/`. Create `scripts` if it doesn't exist. Don't copy `steamdeck-setup.sh` there.
+   - Copy `scripts/ClaudeMenu.cs` (or a built `ClaudeMenu.net.dll`, see below) and `scripts/ClaudeMenu.ini` into the game's `scripts` folder, next to `GTAIV.exe`: `/run/media/deck/<uuid>/steamapps/common/Grand Theft Auto IV/GTAIV/scripts/`. Create `scripts` if it doesn't exist.
    - **Set the Steam launch options** (GTA IV → Properties → General → Launch Options) so Proton loads the mod DLLs:
      ```
      WINEDLLOVERRIDES="dinput8,xlive,dsound=n,b" %command%
@@ -172,7 +172,7 @@ These are the problems we hit on a real Deck, in the order we hit them.
   - switching from Proton 11 to Proton 8
   - deleting Proton's .NET registry keys (winetricks issue #2367)
   - running the `ndp48` installer directly (same cabinet error)
-- **.NET stopped working after changing the Proton version (or after a Proton update).** Switching Proton may rebuild the symlinks in `drive_c/windows`. Set the game back to Proton 8.0 and run `scripts/steamdeck-setup.sh` again (or repeat steps 4 and 5). If the prefix is still broken, `bash scripts/steamdeck-setup.sh --reset-prefix` backs up your saves (from `pfx/drive_c/users/steamuser/Documents/Rockstar Games`) to `~/GTAIV-save-backups`, then empties the prefix; launch the game once on Proton 8.0 and run the script again.
+- **.NET stopped working after changing the Proton version (or after a Proton update).** Switching Proton may rebuild the symlinks in `drive_c/windows`. Set the game back to Proton 8.0 and run `tools/steamdeck-setup.sh` again (or repeat steps 4 and 5). If the prefix is still broken, `bash tools/steamdeck-setup.sh --reset-prefix` backs up your saves (from `pfx/drive_c/users/steamuser/Documents/Rockstar Games`) to `~/GTAIV-save-backups`, then empties the prefix; launch the game once on Proton 8.0 and run the script again.
 - **The Rockstar Games Launcher crashes with "CEF browser crash" on Proton 8.** Expected. The launch in step 2 is only needed to create the prefix.
 - **`vcrun2019` fails** (`vc_redist.x86.exe /q` returned status 102). We skipped it; it isn't known to be needed. See the note at the end of [Install on Steam Deck](#install-on-steam-deck).
 - **A command fails with a strange error, or two commands seem to run as one.** Konsole sometimes merges pasted lines. Paste one command at a time and check it before pressing Enter.
@@ -189,7 +189,7 @@ These are the problems we hit on a real Deck, in the order we hit them.
 ```
 scripts/ClaudeMenu.cs      the whole menu (one file; written in C# 4 because ScriptHookDotNet needs that)
 scripts/ClaudeMenu.ini     settings, combos, saved teleports
-scripts/steamdeck-setup.sh Steam Deck helper: prepares the Proton prefix and installs .NET (don't copy it into the game)
 tools/shdn-stub/           compile-only stand-in for the ScriptHookDotNet API (CI only, never ship it)
+tools/steamdeck-setup.sh   Steam Deck helper: prepares the Proton prefix and installs .NET
 build.bat / build.sh       build ClaudeMenu.net.dll
 ```
