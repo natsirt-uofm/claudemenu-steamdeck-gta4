@@ -68,10 +68,36 @@ namespace GTA
         public static Vehicle CreateVehicle(Model model, Vector3 position) { return null; }
     }
 
+    public enum FontScaling { FontSize, ScreenUnits, Pixel }
+
+    public enum TextAlignment { Top = 0, Left = 0, Center = 1, Right = 2, VerticalCenter = 4, Bottom = 8, WordBreak = 16, SingleLine = 32 }
+
+    public class Font
+    {
+        public Font(float height, FontScaling scaling) { }
+    }
+
+    public sealed class Graphics
+    {
+        public FontScaling Scaling { get; set; }
+        public void DrawRectangle(System.Drawing.RectangleF rect, System.Drawing.Color color) { }
+        public void DrawText(string text, float x, float y, System.Drawing.Color color, Font font) { }
+        public void DrawText(string text, System.Drawing.RectangleF area, TextAlignment alignment, System.Drawing.Color color, Font font) { }
+    }
+
+    public class GraphicsEventArgs : EventArgs
+    {
+        public Graphics Graphics { get { return null; } }
+    }
+
+    public delegate void GraphicsEventHandler(object sender, GraphicsEventArgs e);
+
     public abstract class Script
     {
         public int Interval { get; set; }
         public event EventHandler Tick;
+        public event GraphicsEventHandler PerFrameDrawing;
+        protected void RaisePerFrameDrawing() { if (PerFrameDrawing != null) PerFrameDrawing(this, new GraphicsEventArgs()); }
         public void Wait(int ms) { }
         protected void RaiseTick() { if (Tick != null) Tick(this, EventArgs.Empty); }
     }

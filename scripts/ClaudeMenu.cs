@@ -290,27 +290,27 @@ namespace ClaudeMenu
     // -------------------------------------------------------------------------
     internal static class N
     {
-        private static readonly HashSet<string> broken = new HashSet<string>();
+        private static readonly Dictionary<string, bool> broken = new Dictionary<string, bool>();
 
         public static bool Call(string name, params Parameter[] args)
         {
-            if (broken.Contains(name)) return false;
+            if (broken.ContainsKey(name)) return false;
             try { Function.Call(name, args); return true; }
             catch (Exception ex) { Fail(name, ex); return false; }
         }
 
         public static T Get<T>(string name, T fallback, params Parameter[] args)
         {
-            if (broken.Contains(name)) return fallback;
+            if (broken.ContainsKey(name)) return fallback;
             try { return Function.Call<T>(name, args); }
             catch (Exception ex) { Fail(name, ex); return fallback; }
         }
 
-        public static bool IsBroken(string name) { return broken.Contains(name); }
+        public static bool IsBroken(string name) { return broken.ContainsKey(name); }
 
         private static void Fail(string name, Exception ex)
         {
-            broken.Add(name);
+            broken[name] = true;
             Log.Write("Native " + name + " failed and was disabled: " + ex.Message);
         }
     }
@@ -595,7 +595,7 @@ namespace ClaudeMenu
     // -------------------------------------------------------------------------
     public class MenuScript : Script
     {
-        private const string Version = "1.0.0";
+        private const string Version = "1.0.1";
 
         private readonly Config cfg = new Config();
         private readonly InputState input = new InputState();
@@ -624,6 +624,11 @@ namespace ClaudeMenu
         private int densityIndex = 3;
         private Vehicle lastSpawned;
         private int nextSlowTick;
+        private volatile bool gamePaused;
+        private volatile string coordsText;
+        private bool drawFailed;
+        private static GTA.Graphics gfx;   // only set while OnFrameDraw runs
+        private static readonly Dictionary<int, GTA.Font> fonts = new Dictionary<int, GTA.Font>();
         private readonly Random rng = new Random();
 
         private static readonly string[] WeatherNames = { "Extra Sunny", "Sunny", "Sunny & Windy", "Cloudy", "Rain", "Drizzle", "Foggy", "Thunderstorm" };
@@ -648,6 +653,10 @@ namespace ClaudeMenu
 
             Interval = 0;
             Tick += OnTick;
+            // Drawing has to happen in ScriptHookDotNet's per-frame drawing event.
+            // Drawing natives (DRAW_RECT, DISPLAY_TEXT...) called from Tick run
+            // without errors but never show up on screen.
+            PerFrameDrawing += new GraphicsEventHandler(OnFrameDraw);
             Log.Write("Open combo " + Btn.ToText(cfg.OpenCombo) + ", close combo " + Btn.ToText(cfg.CloseCombo));
         }
 
@@ -693,12 +702,34 @@ namespace ClaudeMenu
                     }
                 }
 
-                if (open && !paused) Draw();
+                gamePaused = paused;
                 RunFeatures();
             }
             catch (Exception ex)
             {
                 Log.Write("Tick error: " + ex);
+            }
+        }
+
+        private void OnFrameDraw(object sender, GraphicsEventArgs e)
+        {
+            if (drawFailed) return;
+            try
+            {
+                gfx = e.Graphics;
+                gfx.Scaling = FontScaling.ScreenUnits;
+                if (open && !gamePaused) Draw();
+                string coords = coordsText;
+                if (coords != null) Text(coords, 0.40f, 0.95f, 0.28f, Col.White, false);
+            }
+            catch (Exception ex)
+            {
+                drawFailed = true;
+                Log.Write("Drawing failed and was turned off: " + ex);
+            }
+            finally
+            {
+                gfx = null;
             }
         }
 
@@ -925,42 +956,45 @@ namespace ClaudeMenu
             return arr[1].Title.ToUpperInvariant() + " / " + arr[0].Title.ToUpperInvariant();
         }
 
-        private static void Rect(float x, float y, float w, float h, Col c)
+        // Drawing helpers. They only work inside OnFrameDraw, where gfx is set.
+        // Coordinates are screen units (0..1), like the old DRAW_RECT code.
+        private static System.Drawing.Color ToColor(Col c)
         {
-            // DRAW_RECT takes the centre point.
-            N.Call("DRAW_RECT", x + w / 2f, y + h / 2f, w, h, (int)c.R, (int)c.G, (int)c.B, (int)c.A);
+            return System.Drawing.Color.FromArgb(c.A, c.R, c.G, c.B);
         }
 
-        private static void SetupText(float scale, Col c)
+        private static GTA.Font FontFor(float scale)
         {
-            N.Call("SET_TEXT_FONT", 0);
-            N.Call("SET_TEXT_SCALE", scale, scale);
-            N.Call("SET_TEXT_COLOUR", (int)c.R, (int)c.G, (int)c.B, (int)c.A);
-            N.Call("SET_TEXT_DROPSHADOW", false, 0, 0, 0, 0);
-            N.Call("SET_TEXT_EDGE", 1, 0, 0, 0, 205);
+            // scale is the old SET_TEXT_SCALE value; 0.30 is a normal row.
+            int key = (int)Math.Round(scale * 1000f);
+            GTA.Font f;
+            if (!fonts.TryGetValue(key, out f))
+            {
+                f = new GTA.Font(scale * 0.075f, FontScaling.ScreenUnits);
+                fonts[key] = f;
+            }
+            return f;
+        }
+
+        private static void Rect(float x, float y, float w, float h, Col c)
+        {
+            if (gfx == null) return;
+            gfx.DrawRectangle(new System.Drawing.RectangleF(x, y, w, h), ToColor(c));
         }
 
         private static void Text(string s, float x, float y, float scale, Col c, bool center)
         {
-            SetupText(scale, c);
-            if (center) N.Call("SET_TEXT_CENTRE", true);
-            N.Call("DISPLAY_TEXT_WITH_LITERAL_STRING", x, y, "STRING", s);
+            if (gfx == null || s == null) return;
+            if (center)
+                gfx.DrawText(s, new System.Drawing.RectangleF(x - 0.5f, y, 1.0f, 0.2f), TextAlignment.Center, ToColor(c), FontFor(scale));
+            else
+                gfx.DrawText(s, x, y, ToColor(c), FontFor(scale));
         }
 
         private static void TextRight(string s, float right, float y, float scale, Col c)
         {
-            if (!N.IsBroken("SET_TEXT_RIGHT_JUSTIFY") && !N.IsBroken("SET_TEXT_WRAP"))
-            {
-                SetupText(scale, c);
-                if (N.Call("SET_TEXT_RIGHT_JUSTIFY", true) && N.Call("SET_TEXT_WRAP", 0.0f, right))
-                {
-                    N.Call("DISPLAY_TEXT_WITH_LITERAL_STRING", 0.0f, y, "STRING", s);
-                    return;
-                }
-            }
-            // Fallback: estimate the width.
-            float approx = s.Length * scale * 0.028f;
-            Text(s, right - approx, y, scale, c, false);
+            if (gfx == null || s == null) return;
+            gfx.DrawText(s, new System.Drawing.RectangleF(right - 0.6f, y, 0.6f, 0.2f), TextAlignment.Right, ToColor(c), FontFor(scale));
         }
 
         private static void Notify(string msg)
@@ -1013,9 +1047,9 @@ namespace ClaudeMenu
             if (showCoords)
             {
                 Vector3 p = ped.Position;
-                string s = string.Format(CultureInfo.InvariantCulture, "X {0:0.0}  Y {1:0.0}  Z {2:0.0}  H {3:0}", p.X, p.Y, p.Z, ped.Heading);
-                Text(s, 0.40f, 0.95f, 0.28f, Col.White, false);
+                coordsText = string.Format(CultureInfo.InvariantCulture, "X {0:0.0}  Y {1:0.0}  Z {2:0.0}  H {3:0}", p.X, p.Y, p.Z, ped.Heading);
             }
+            else coordsText = null;
 
             // Things that don't need to run every frame.
             if (now < nextSlowTick) return;
@@ -1208,7 +1242,6 @@ namespace ClaudeMenu
             while (!N.Get<bool>("HAS_MODEL_LOADED", false, hash))
             {
                 if (Environment.TickCount > deadline) { Notify("Timed out loading " + model); return; }
-                Draw();
                 Wait(0);
             }
 
