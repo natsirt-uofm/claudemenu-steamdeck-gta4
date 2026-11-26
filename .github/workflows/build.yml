@@ -5,5 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y mono-mcs
+      # build.sh --check compiles with -noconfig against System.Drawing, System.Windows.Forms
+      # and System.Xml (ScriptHookDotNet's reference set), so install those assemblies too.
+      - run: sudo apt-get update && sudo apt-get install -y mono-mcs libmono-system-drawing4.0-cil libmono-system-windows-forms4.0-cil libmono-system-xml4.0-cil
       - run: ./build.sh --check

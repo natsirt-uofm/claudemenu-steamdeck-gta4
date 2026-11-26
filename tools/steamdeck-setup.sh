@@ -15,8 +15,13 @@
 #      leaves a symlink in the old place.
 #   5. Replaces the symlinks in pfx/drive_c/windows with real copies.
 #      Without this, dotnet48 fails with "FDICopy failed".
-#   6. Installs .NET Framework 4.8 with Protontricks and checks for clr.dll.
-#   7. Prints the command for the GTA IV Downgrader. It does NOT run it.
+#   6. Deletes Proton's own .NET registry keys (harmless if they're missing),
+#      installs .NET Framework 4.8 with Protontricks and checks for clr.dll.
+#   7. Sets the prefix to Windows 10 (winetricks leaves it on Windows 7 after
+#      dotnet48, and the Downgrader complains) and turns off WPF hardware
+#      acceleration, so WPF tools like the Downgrader don't draw a black window
+#      under DXVK.
+#   8. Prints the command for the GTA IV Downgrader. It does NOT run it.
 #
 # Options:
 #   --dry-run        show what would be done, change nothing
@@ -53,6 +58,12 @@ DOTNET_NEED_KB=$((3 * 1024 * 1024))
 CACHE_NEED_KB=$((500 * 1024))
 # .NET 4.8 sets "Release" to 528040 or higher.
 NET48_RELEASE=528040
+# Run before dotnet48: removes the .NET keys Proton ships, which can confuse the
+# installer. "reg delete" just complains if a key is already gone.
+NET_KEYS_CMD='wine reg delete "HKLM\Software\Wow6432Node\Microsoft\NET Framework Setup\NDP" /f; wine reg delete "HKLM\Software\Wow6432Node\Microsoft\.NETFramework" /f'
+# WPF apps (the GTA IV Downgrader is one) can render a black window under DXVK;
+# software rendering for WPF fixes that and doesn't affect the game.
+WPF_CMD='wine reg add "HKCU\Software\Microsoft\Avalon.Graphics" /v DisableHWAcceleration /t REG_DWORD /d 1 /f'
 
 # ---------------------------------------------------------------- helpers ---
 step() { printf '\n== %s\n' "$*"; }
@@ -447,8 +458,11 @@ else
         info "clr.dll exists but the registry doesn't show .NET 4.8 (Release=$(net_release)); reinstalling"
     fi
     if (( DRY_RUN )); then
+        run flatpak run "$PT_APP" -c "$NET_KEYS_CMD" "$APPID"
         run flatpak run "$PT_APP" "$APPID" -q -f dotnet48
     else
+        info "removing Proton's .NET registry keys first (errors about missing keys are fine)"
+        flatpak run "$PT_APP" -c "$NET_KEYS_CMD" "$APPID" || true
         info "running: flatpak run $PT_APP $APPID -q -f dotnet48"
         info "This takes a while and can look stuck. Wine error lines are normal."
         pt_status=0
@@ -468,8 +482,46 @@ else
     fi
 fi
 
-# ------------------------------------------------------- 7. next steps ---
-step "7. Next steps (not run by this script)"
+# ------------------------------------- 7. Windows 10 + WPF software mode ---
+step "7. Windows version and WPF rendering"
+
+# True if a .reg file has a value line under a section whose name ends with $2.
+reg_has() { # file, section suffix (as written in the .reg file), value line prefix
+    [[ -f $1 ]] || return 1
+    # awk -v turns \\ into \, so double every backslash to match the file literally.
+    local sec=${2//\\/\\\\} val=${3//\\/\\\\}
+    awk -v sec="$sec]" -v val="$val" '
+        /^\[/ { in_sec = (index($0, sec) > 0) }
+        in_sec && index($0, val) == 1 { found = 1 }
+        END { exit found ? 0 : 1 }
+    ' "$1"
+}
+
+if reg_has "$PFX/system.reg" 'Windows NT\\CurrentVersion' '"ProductName"="Microsoft Windows 10'; then
+    ok "prefix already reports Windows 10"
+elif (( DRY_RUN )); then
+    run flatpak run "$PT_APP" "$APPID" -q win10
+else
+    info "setting the prefix to Windows 10 (the Downgrader complains about Windows 7)"
+    flatpak run "$PT_APP" "$APPID" -q win10 || warn "protontricks win10 returned an error; check the output above"
+    if reg_has "$PFX/system.reg" 'Windows NT\\CurrentVersion' '"ProductName"="Microsoft Windows 10'; then
+        ok "prefix now reports Windows 10"
+    else
+        warn "couldn't confirm Windows 10 in the registry. Run: flatpak run $PT_APP $APPID -q win10"
+    fi
+fi
+
+if reg_has "$PFX/user.reg" 'Microsoft\\Avalon.Graphics' '"DisableHWAcceleration"=dword:00000001'; then
+    ok "WPF hardware acceleration already off"
+elif (( DRY_RUN )); then
+    run flatpak run "$PT_APP" -c "$WPF_CMD" "$APPID"
+else
+    flatpak run "$PT_APP" -c "$WPF_CMD" "$APPID" || warn "couldn't set the WPF registry value; see README troubleshooting"
+    ok "WPF apps will use software rendering (fixes black Downgrader windows under DXVK)"
+fi
+
+# ------------------------------------------------------- 8. next steps ---
+step "8. Next steps (not run by this script)"
 downgrader=""
 if [[ -d $HOME/Downloads ]]; then
     downgrader=$(find "$HOME/Downloads" -maxdepth 3 -type f -iname '*downgrader*.exe' 2>/dev/null | head -n 1 || true)

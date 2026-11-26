@@ -1,8 +1,10 @@
-# ClaudeMenu: a GTA IV mod menu you can use entirely with a controller
+# ClaudeMenu: an all-in-one GTA IV trainer you can use entirely with a controller
 
-ClaudeMenu is a trainer-style mod menu for GTA IV. Everything works from a gamepad: opening and closing it, moving through it, changing settings, and even rebinding the open/close buttons. It was built for the **Steam Deck**, and it works with any XInput controller on Windows too.
+ClaudeMenu is a trainer for GTA IV that you drive completely from a gamepad: opening it, moving through it, changing values and even rebinding its buttons. It was built for the **Steam Deck** and works with any XInput controller on Windows too. Its headline features are a **customs garage** (paint with live preview, extras, livery, doors, tyres, proofs) and **performance multipliers** (engine power, brakes, grip, top speed, nitro).
 
-It reads the controller directly through XInput instead of the game's key bindings. Under Proton, Steam Input shows the Deck's controls to the game as an Xbox 360 pad, so button combos work the same way whatever the in-game control settings are.
+It reads the controller directly through XInput instead of the game's key bindings. Under Proton, Steam Input shows the Deck's controls to the game as an Xbox 360 pad, so button combos work the same whatever the in-game control settings are.
+
+**Status:** version 1.0.1 has been confirmed on a real Steam Deck (it loads, draws and responds to the controller). Version 1.1.0, the full trainer in this repository, compiles with ScriptHookDotNet's exact reference set. An automated test opens every menu and presses every item against a stand-in for ScriptHookDotNet, and every native call is checked against GTA IV's native list. **1.1.0 hasn't been run in the game yet.** If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
 
 ## Controls
 
@@ -10,24 +12,57 @@ It reads the controller directly through XInput instead of the game's key bindin
 |---|---|---|
 | **Open menu** | **LB + RB + X** (hold LB+RB, tap X) | F4 |
 | **Close menu** | **LB + RB + B**, or B on the main page | F4 |
-| Move up / down | D-pad or left stick (hold to scroll) | Arrows |
+| Move up / down | D-pad or left stick (hold to scroll; it speeds up) | Arrows |
 | Page up / down | LT / RT | |
 | Select / toggle | A | Enter |
 | Change value | D-pad left / right | Left / Right |
 | Back | B | Backspace |
+| **Nitro** (while driving) | **L3** (click the left stick) | |
 
-You can rebind both combos in-game under **Settings → Rebind Open/Close Combo**: hold the new buttons, then let go. You can also change them in `ClaudeMenu.ini`. By default your character is frozen while the menu is open, so menu buttons don't also make Niko jump, sprint or open the phone. You can turn this off in Settings.
+You can rebind the open, close and nitro buttons in-game under **Settings**: choose one, hold the new button(s), then let go. You can also change them in `ClaudeMenu.ini`. By default your character is frozen while the menu is open, so menu buttons don't also make Niko jump, sprint or open the phone. You can turn this off in Settings.
 
-**Steam Deck tip:** in Steam Input you can set a back grip (L4/R4/L5/R5) to press LB+RB+X all at once. Then one paddle opens the menu.
+**Steam Deck tips:** in Steam Input, set one back grip (L4/R4/L5/R5) to press LB+RB+X at once so a single paddle opens the menu, and another to L3 for nitro.
 
 ## Features
 
-- **Player:** god mode, heal and armor, never wanted, set wanted level, police ignore you, everyone ignores you, unlimited sprint, move speed, never fall off bike, can't be dragged out, seatbelt, add money
-- **Vehicle:** spawner with 9 categories (about 80 models, and models missing from your episode are skipped safely), replace last spawn, warp in, repair, wash, flip, vehicle god mode, auto repair, speed boost, random colour, delete
-- **Weapons:** give all, give single weapon, infinite ammo, refill, remove all
-- **Teleport:** to map waypoint (finds the ground), forward and up nudges, 6 save/load slots kept in the INI, and your own named locations from the INI
-- **World:** set the hour, freeze time, weather, game speed (slow motion), traffic and ped density, clear area, show coordinates
-- **Settings:** rebind combos, freeze-while-open, stick navigation, position (left/center/right), 6 colour themes, menu size (bigger is easier to read on the Deck's 7" screen), save
+- **Player:** god mode, refill health and armour, auto heal, keep armour full, kill player; never wanted, set wanted level, police ignore you, everyone ignores you; super jump, fast run, unlimited sprint, no ragdoll, ragdoll now, never fall off bike, can't be dragged out, seatbelt; change player model (story characters, police, gangs, civilians); cash (see it, add, remove, set to $0)
+- **Vehicles:**
+  - **Spawner:** 11 categories (about 150 models, including EFLC ones), plus a controller-friendly **search** (pick letters with the D-pad). Models missing from your episode are marked and skipped safely. Spawn driving it or parked in front of you, replace your last spawn, delete the last or all spawned vehicles.
+  - **Customs garage:** primary, secondary, specular and trim colour from GTA IV's full 137-colour palette with names and swatches, previewed live as you scroll (A keeps it, B puts the old colour back); random paint; extras 1–9 on/off; livery; dirt level; open, close or break off each door, the hood and trunk; smash or remove windows; repair, wash, burst/fix tyres, bulletproof tyres; engine off; bulletproof, fireproof, explosion-, collision- and melee-proof.
+  - **Performance:** engine power and brake multipliers (1.0x–10.0x in 0.5 steps), handbrake strength, grip assist, top speed limit, and nitro with a tank, three power levels and an infinite option. Tuning is kept per vehicle (or one tuning for every vehicle). A speedometer shows km/h or mph, the nitro tank and the active tuning.
+  - **Presets:** save the car you're in (model, paint, extras, livery, dirt, tuning) to `ClaudeMenu.ini`, then spawn it again, apply it to another car, overwrite or delete it.
+  - **Quick actions:** repair, wash, flip upright, vehicle god mode, auto repair, delete.
+- **Weapons:** give all (for the episode you're playing), give one weapon, infinite ammo, no reload, fast reload, refill, explosive hits, remove all
+- **World:** hour and minute, freeze time, weather, traffic / pedestrian / parked car density, clear area (everything, vehicles, peds or police), game speed (slow motion), gravity on/off, unlock all islands
+- **Teleport:** map waypoint (finds the ground), forward and up nudges, 29 Liberty City landmarks across Algonquin, Broker & Dukes, Bohan and Alderney, 6 save/load slots and your own named locations from the INI
+- **Misc:** hide HUD and radar, hide radar only, coordinates, FPS counter, free camera (fly with the sticks, A teleports you there), speedometer and units
+- **Settings:** rebind open/close/nitro, set the jump button Super Jump listens for, freeze-while-open, stick navigation, keyboard fallback, menu position (left/center/right), 6 colour themes, menu size, rows shown, save when the menu closes, controller status
+
+The menu has section headers, ON/OFF switches, values shown as `< 2.5x >`, a tooltip line for the selected item, a scrollbar, and a highlight that glides between rows.
+
+### How the performance multipliers work
+
+GTA IV has no native for engine power, torque or brake force (nothing like GTA V's power multiplier). Editing handling data in memory depends on the exact game version and isn't safe from a loose script. So ClaudeMenu adds an **assist**: every frame it applies a small velocity change to the car with `APPLY_FORCE_TO_CAR`, scaled by the frame time. That keeps it smooth and the same at 30 or 60 fps. It uses the force type and arguments that ScriptHookDotNet's own `Vehicle.ApplyForce` and `Vehicle.Velocity` use.
+
+- **Engine power:** while you hold the throttle (RT), extra forward acceleration of `(multiplier − 1) × 3.5 m/s²`, scaled by how far the trigger is pressed and tapering at very high speed. Only on the ground, never in reverse. Because it keeps pushing, high multipliers also raise the top speed.
+- **Brakes:** while you brake (LT) and are moving forward, extra deceleration of `(multiplier − 1) × 6 m/s²`. It never pushes you into reverse.
+- **Handbrake:** extra deceleration along your direction of travel while the handbrake (RB) is held.
+- **Grip assist:** removes part of the sideways slide each frame (0 = off, 10 = on rails).
+- **Top speed limit:** gently pulls you back to the limit instead of cutting power.
+- **Nitro:** a strong forward push while L3 is held. The tank drains in about 3.5 s and refills after a short pause.
+
+Limits: it pushes the whole car, so gear ratios, engine sound and wheelspin don't change the way a real handling edit would. It works on cars and bikes (not helicopters or boats). It reads the throttle from the controller triggers, or W/S/Space on a keyboard without a controller, so a custom binding that moves accelerate elsewhere won't drive it. If the multipliers feel far too weak or too strong in your setup, change `ForceScale` under `[Performance]` in `ClaudeMenu.ini` (1.0 by default).
+
+### What GTA IV can't do (so ClaudeMenu doesn't pretend to)
+
+- **Windows can't be rolled down or up**: there's no native for it. You can smash or remove them, and Repair restores them.
+- **IV can't tell which extras a model has.** Extras 1–9 are always listed; the ones a model doesn't have do nothing.
+- **Gravity is on or off**: there's no low-gravity setting.
+- **Explosive hits** only work on people and vehicles you damage (IV has no bullet-impact native, so walls and the ground don't explode).
+- **Super jump** boosts the jump the game already does. It listens for the jump button (X on an Xbox-style pad; change it under Settings if you rebound it). Fall damage is off while it's on.
+- **Fast run** speeds up the walking and running animations, which is the only run-speed control IV has.
+- **Liveries** only exist on some models (taxis, police and a few others).
+- **Player models and vehicles** that aren't in the episode you're playing are reported as unavailable instead of loading.
 
 ## Requirements
 
@@ -39,7 +74,7 @@ ClaudeMenu is a **ScriptHookDotNet** script. You need:
 
 ## Install on Steam Deck
 
-This is the procedure that worked on a real Steam Deck (SteamOS, Desktop Mode, GTA IV Complete Edition on the SD card, Protontricks from Discover). **Steps 1–5 are tested. Step 6 (the Downgrader) has not been tested on a Deck yet.**
+This is the procedure that got ClaudeMenu 1.0.1 running on a real Steam Deck (SteamOS, Desktop Mode, GTA IV Complete Edition on the SD card, Protontricks from Discover).
 
 Before you start:
 
@@ -50,7 +85,7 @@ Before you start:
 
 ### Quick way: the setup script
 
-`tools/steamdeck-setup.sh` does steps 1 and 3–5 for you and then prints the commands for steps 6 and 7. You still do step 2 by hand first. Download this repository (Code → Download ZIP), extract it, open Konsole in the extracted folder, and run:
+`tools/steamdeck-setup.sh` does steps 1 and 3–5 for you (including the registry and Windows-version fixes) and then prints the commands for steps 6 and 7. You still do step 2 by hand first. Download this repository (Code → Download ZIP), extract it, open Konsole in the extracted folder, and run:
 
 ```
 bash tools/steamdeck-setup.sh --dry-run
@@ -115,7 +150,11 @@ It finds the library that holds GTA IV from Steam's `libraryfolders.vdf`, prints
    ```
    **After this, keep GTA IV on the same Proton version.** Switching Proton may rebuild those symlinks and break .NET.
 
-5. **Install .NET Framework 4.8.** This takes a long time and can look stuck. Lots of Wine error lines are normal.
+5. **Install .NET Framework 4.8.** First remove the .NET registry keys Proton ships. Errors saying a key doesn't exist are fine. Paste this as one line:
+   ```
+   flatpak run com.github.Matoking.protontricks -c 'wine reg delete "HKLM\Software\Wow6432Node\Microsoft\NET Framework Setup\NDP" /f; wine reg delete "HKLM\Software\Wow6432Node\Microsoft\.NETFramework" /f' 12210
+   ```
+   Then install .NET. This takes a long time and can look stuck. Lots of Wine error lines are normal.
    ```
    flatpak run com.github.Matoking.protontricks 12210 -q -f dotnet48
    ```
@@ -123,8 +162,16 @@ It finds the library that holds GTA IV from Steam's `libraryfolders.vdf`, prints
    ```
    ls "$SD/steamapps/compatdata/12210/pfx/drive_c/windows/Microsoft.NET/Framework/v4.0.30319/clr.dll"
    ```
+   Winetricks leaves the prefix set to Windows 7 after `dotnet48`, and the Downgrader complains about that. Set it back to Windows 10:
+   ```
+   flatpak run com.github.Matoking.protontricks 12210 -q win10
+   ```
 
-6. **Downgrade and mod the game (untested on a Deck).** Download the [GTA IV Downgrader](https://github.com/ClonkAndre/GTAIVDowngrader) and run it inside the game's prefix. Paste this as one line, using the real path and file name of the `.exe` you downloaded:
+6. **Downgrade and mod the game.** The GTA IV Downgrader is a WPF app, and under DXVK WPF windows can come up black. Switching WPF to software rendering fixes that and doesn't affect the game. Paste this as one line:
+   ```
+   flatpak run com.github.Matoking.protontricks -c 'wine reg add "HKCU\Software\Microsoft\Avalon.Graphics" /v DisableHWAcceleration /t REG_DWORD /d 1 /f' 12210
+   ```
+   Download the [GTA IV Downgrader](https://github.com/ClonkAndre/GTAIVDowngrader) and run it inside the game's prefix. Paste this as one line, using the real path and file name of the `.exe` you downloaded:
    ```
    flatpak run --command=protontricks-launch com.github.Matoking.protontricks --appid 12210 ~/Downloads/GTAIVDowngrader.exe
    ```
@@ -170,9 +217,11 @@ These are the problems we hit on a real Deck, in the order we hit them.
   - freeing disk space or moving the prefix to the SD card
   - clearing the winetricks download cache
   - switching from Proton 11 to Proton 8
-  - deleting Proton's .NET registry keys (winetricks issue #2367)
+  - deleting Proton's .NET registry keys on their own (winetricks issue #2367). Step 5 still does this before `dotnet48`, as a precaution.
   - running the `ndp48` installer directly (same cabinet error)
 - **.NET stopped working after changing the Proton version (or after a Proton update).** Switching Proton may rebuild the symlinks in `drive_c/windows`. Set the game back to Proton 8.0 and run `tools/steamdeck-setup.sh` again (or repeat steps 4 and 5). If the prefix is still broken, `bash tools/steamdeck-setup.sh --reset-prefix` backs up your saves (from `pfx/drive_c/users/steamuser/Documents/Rockstar Games`) to `~/GTAIV-save-backups`, then empties the prefix; launch the game once on Proton 8.0 and run the script again.
+- **The Downgrader complains about the Windows version.** Winetricks leaves the prefix on Windows 7 after `dotnet48`. Run `flatpak run com.github.Matoking.protontricks 12210 -q win10` (step 5; the setup script does it too).
+- **The Downgrader (or another WPF tool) opens as a black window.** WPF's hardware rendering doesn't get along with DXVK. Turn it off with the `Avalon.Graphics` registry command in step 6 (the setup script does it too). It only affects WPF apps, not the game.
 - **The Rockstar Games Launcher crashes with "CEF browser crash" on Proton 8.** Expected. The launch in step 2 is only needed to create the prefix.
 - **`vcrun2019` fails** (`vc_redist.x86.exe /q` returned status 102). We skipped it; it isn't known to be needed. See the note at the end of [Install on Steam Deck](#install-on-steam-deck).
 - **A command fails with a strange error, or two commands seem to run as one.** Konsole sometimes merges pasted lines. Paste one command at a time and check it before pressing Enter.
@@ -181,15 +230,38 @@ These are the problems we hit on a real Deck, in the order we hit them.
 
 - **The combo does nothing.** Look in `scripts/ClaudeMenu.log`. If there's no log, ScriptHookDotNet didn't load the script (check ScriptHookDotNet's own log, .NET in the prefix, and the launch options). If the log exists, open the menu with F4 and check **Settings → Controller Status**.
 - **Some option does nothing.** If one game function fails, ClaudeMenu logs it, turns off only that function, and keeps running. Send the log lines.
+- **The performance multipliers feel too weak or too strong.** Raise or lower `ForceScale` under `[Performance]` in `ClaudeMenu.ini` (edit it with the game closed). Also check you're the driver and holding RT: the multipliers read the triggers.
+- **Nitro does nothing.** It needs Performance → Nitro on, you driving a car or bike, and the nitro button (L3 by default) held. Rebind it under **Settings → Rebind Nitro Button**.
+- **Super jump does nothing.** It listens for the game's jump button (X on an Xbox-style pad). If you moved jump in Steam Input or the game, set it under **Settings → Set Jump Button**.
+- **Free camera says it isn't working.** The camera couldn't be created in your setup; the log has the details. Everything else keeps working.
 - **The text sits a bit off in its rows.** Change **Settings → Menu Size**.
 - **The menu stays frozen after closing, or you can't move.** Open and close the menu again, or turn off "Freeze Player While Open".
+
+## ClaudeMenu.ini
+
+The menu writes this file itself (Settings → Save Settings Now, or automatically with "Save When Menu Closes"). You can also edit it with the game closed:
+
+- `[Controls]`: `OpenCombo`, `CloseCombo`, `NitroButton`, `JumpButton` (buttons joined with `+`), freeze-while-open, stick navigation, keyboard fallback
+- `[Display]`: menu position, theme, size, rows shown, `SaveOnClose`, `Speedometer`, `SpeedUnits` (`kmh` or `mph`)
+- `[Performance]`: `ForceScale`
+- `[Teleport]`: saved slots and your own `Location=Name|X|Y|Z` lines
+- `[Vehicles]`: one `Preset=` line per saved vehicle; the first field is its name, so you can rename presets here
 
 ## Layout
 
 ```
-scripts/ClaudeMenu.cs      the whole menu (one file; written in C# 4 because ScriptHookDotNet needs that)
-scripts/ClaudeMenu.ini     settings, combos, saved teleports
+scripts/ClaudeMenu.cs      the whole trainer (one file, C# 4; regions per section)
+scripts/ClaudeMenu.ini     settings, combos, saved teleports, vehicle presets
 tools/shdn-stub/           compile-only stand-in for the ScriptHookDotNet API (CI only, never ship it)
 tools/steamdeck-setup.sh   Steam Deck helper: prepares the Proton prefix and installs .NET
 build.bat / build.sh       build ClaudeMenu.net.dll
 ```
+
+## Notes for developers
+
+These rules come from getting the script running on a real Deck. Please keep them:
+
+- **One loose `scripts/ClaudeMenu.cs`, written in C# 4.** ScriptHookDotNet compiles it in-game and references only System, System.Drawing, System.Windows.Forms, System.Xml and ScriptHookDotNet. There's no System.Core, so no `HashSet` and no LINQ. `./build.sh --check` compiles with exactly that reference set (`-noconfig`).
+- **Draw only in `PerFrameDrawing`, with `GTA.Graphics`.** Drawing natives called from `Tick` run but never show up. `Tick` runs the game logic and builds a `FrameView` snapshot; the drawing code only renders that snapshot.
+- **Call natives only through `N.Call` / `N.Get`** (and the `N.OutInt` / `N.OutFloat` helpers). A failing native is logged once and switched off instead of crashing the script. Use GTA IV natives only, checked against the IV native list and the ScriptHookDotNet source.
+- **Keep `tools/shdn-stub` honest.** When you use a new ScriptHookDotNet member, add it to the stub with the same name and signature as in ScriptHookDotNet 1.7.x, so the compile check stays meaningful.
