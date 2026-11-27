@@ -1270,7 +1270,7 @@ namespace ClaudeMenu
 
     public partial class MenuScript : Script
     {
-        private const string Version = "1.3.0";
+        private const string Version = "1.4.0";
 
         private readonly Config cfg = new Config();
         private readonly InputState input = new InputState();
@@ -3864,7 +3864,7 @@ namespace ClaudeMenu
             get
             {
                 return carMagnet || carRain || jumpyTraffic || floatyCars || crazyTraffic || madDrivers || rainbowTraffic || honkChorus || ghostTraffic
-                    || blackHole || tornado || earthquake || repulsor || meteors || timeLapse || weatherRoulette || riot;
+                    || blackHole || tornado || earthquake || repulsor || meteors || timeLapse || weatherRoulette || riot || TsunamiActive;
             }
         }
 
@@ -3916,6 +3916,8 @@ namespace ClaudeMenu
             m.Add(new ActionItem("Mass Breakdown", () => ChaosOnce("breakdown"), "Kills the engine of every car in range"));
             m.Add(new ActionItem("Clean Up Rain Cars", () => { int n = ClearRainCars(true); Notify("Removed " + n + " rain car" + (n == 1 ? "" : "s")); }));
 
+            AddTsunamiItems(m);
+
             m.Header("Settings");
             m.Add(new FloatItem("Chaos Radius", 30f, 150f, 10f, () => chaosRadius, v => chaosRadius = v, "0", " m", null, "How far around you chaos reaches"));
             m.Add(new FloatItem("Chaos Strength", 1f, 10f, 1f, () => chaosStrength, v => chaosStrength = v, "0", "", null, "How hard things get pushed, and how often things happen"));
@@ -3931,6 +3933,7 @@ namespace ClaudeMenu
             if (blackHole) n.Add("Black Hole"); if (tornado) n.Add("Tornado"); if (earthquake) n.Add("Earthquake");
             if (repulsor) n.Add("Repulsor"); if (meteors) n.Add("Meteors"); if (timeLapse) n.Add("Time Lapse");
             if (weatherRoulette) n.Add("Weather"); if (riot) n.Add("Riot");
+            if (TsunamiActive) n.Add(tsunamiPhase == 1 ? "Tsunami coming" : "Tsunami");
             return string.Join(", ", n.ToArray());
         }
 
@@ -4001,6 +4004,7 @@ namespace ClaudeMenu
             List<Vehicle> cars = needCars ? ChaosCars(me, chaosRadius) : null;
             List<Ped> peds = needPeds ? ChaosPeds(me, chaosRadius, true) : null;
 
+            TickTsunami(ped, k);
             if (carMagnet) TickMagnet(cars, me, s, k);
             if (jumpyTraffic)
                 foreach (Vehicle v in cars)
@@ -4325,7 +4329,247 @@ namespace ClaudeMenu
             if (ghostTraffic) { ghostTraffic = false; RestoreHiddenCars(); }
             if (weatherRoulette) { weatherRoulette = false; N.Call("RELEASE_WEATHER"); }
             if (riot) { riot = false; EndRiot(); }
+            EndTsunami();
             chaosBadge = null;
+        }
+    }
+
+    #endregion
+
+    #region Chaos: tsunami
+    //
+    //  GTA IV can't raise the sea from a script: there's no water-level native, and
+    //  ScriptHookDotNet's memory helper is private, so a real flood would mean
+    //  writing to unknown memory addresses. This is the closest honest thing: a
+    //  storm-surge WAVE.
+    //
+    //   Warning  find the real nearest sea (GET_WATER_HEIGHT in 16 directions, water
+    //            at two distances so a park pond doesn't count), thunderstorm,
+    //            FORCE_WIND(1.0) (Rockstar uses 0..1; it also roughens the real
+    //            ocean), people flee from the coast, a countdown.
+    //   Wave     a straight front sweeps in from that sea and past you. In the 30 m
+    //            band behind the front, cars and people are lifted and carried
+    //            toward the wave's speed, cars get tumbled, and Rockstar's car-wash
+    //            water effects (water_carwash_mist / _jets) spray along the front.
+    //   Behind   cars float and drift in a slow current for a while.
+    //   After    weather and wind go back to the game (FORCE_WIND(-1), RELEASE_WEATHER).
+    //
+    //  Same rules as the rest of Chaos: never you or your vehicle (unless "Wave Hits
+    //  Me Too" is on), never mission characters or vehicles, capped counts.
+    //
+
+    public partial class MenuScript
+    {
+        private const int TsunamiWarnMs = 8000;
+        private const float WaveBand = 30f, FloodBand = 90f, WaveEnd = 260f;
+        private static readonly string[] WaveSizeNames = { "Small", "Big", "Mega" };
+        private static readonly float[] WaveLift = { 0.6f, 1.2f, 2.0f };      // extra lift at the crest, m/s per 100 ms
+        private static readonly float[] WaveHeight = { 4f, 8f, 15f };        // how high things get carried, m
+        private static readonly string[] WaveSpeedNames = { "Slow", "Fast", "Insane" };
+        private static readonly float[] WaveSpeeds = { 15f, 22f, 35f };       // m/s
+        private static readonly string[] WaveFromNames = { "Nearest Sea", "Behind Me", "Ahead of Me" };
+
+        private int waveSize = 1, waveSpeed = 1, waveFrom;
+        private bool waveHitsMe;
+
+        private int tsunamiPhase;          // 0 off, 1 warning, 2 wave
+        private int tsunamiWarnUntil, tsunamiSprayAt, tsunamiRumbleAt;
+        private Vector3 waveOrigin, waveDir, wavePerp;
+        private float waveFront, waveBaseZ;
+        private string waveFromText;
+        private readonly List<int> sprays = new List<int>();
+
+        private bool TsunamiActive { get { return tsunamiPhase != 0; } }
+
+        private void AddTsunamiItems(Menu m)
+        {
+            m.Header("Tsunami");
+            m.Add(new ActionItem("Send a Tsunami", StartTsunami,
+                "A storm-surge wave rolls in from the sea and carries cars and people away. GTA IV can't raise the actual sea"));
+            m.Add(new ListItem("Wave Size", WaveSizeNames, () => waveSize, v => waveSize = v, true, "How high it throws things (about 4 / 8 / 15 m)"));
+            m.Add(new ListItem("Wave Speed", WaveSpeedNames, () => waveSpeed, v => waveSpeed = v, true, "15 / 22 / 35 m/s"));
+            m.Add(new ListItem("Wave Comes From", WaveFromNames, () => waveFrom, v => waveFrom = v, true, "Nearest Sea looks for real water around you"));
+            m.Add(new ToggleItem("Wave Hits Me Too", () => waveHitsMe, v => waveHitsMe = v, "Off: it flows around you and your car. On: you get swept away as well"));
+            m.Add(new ActionItem("Stop Tsunami", () => { if (TsunamiActive) { EndTsunami(); Notify("Tsunami stopped"); } else Notify("No tsunami running"); }));
+        }
+
+        private void StartTsunami()
+        {
+            Ped ped = PlayerPed(); if (ped == null) return;
+            if (TsunamiActive) { Notify("A tsunami is already on its way"); return; }
+            Vector3 me = ped.Position;
+            float dist;
+            Vector3 toSea;
+            if (waveFrom == 0 && FindSea(me, out toSea, out dist)) { }
+            else
+            {
+                Vector3 fwd = U.HeadingDir(ped.Heading);
+                toSea = waveFrom == 2 ? fwd : U.Mul(fwd, -1f);
+                dist = 250f;
+                if (waveFrom == 0) Notify("No sea found nearby; the wave comes from behind you");
+            }
+            waveDir = U.Mul(toSea, -1f);                      // the wave travels from the sea toward you
+            wavePerp = U.V(-waveDir.Y, waveDir.X, 0f);
+            waveOrigin = me;
+            waveBaseZ = me.Z;
+            waveFront = -dist;                                // the front starts at the sea
+            waveFromText = Compass(toSea);
+            tsunamiPhase = 1;
+            tsunamiWarnUntil = now + TsunamiWarnMs;
+
+            N.Call("FORCE_WEATHER_NOW", 7);                   // thunderstorm
+            N.Call("FORCE_WIND", 1.0f);
+            Vector3 coast = U.Add(me, U.Mul(toSea, dist));
+            foreach (Ped p in ChaosPeds(me, Math.Min(chaosRadius * 1.5f, 120f), false))
+                N.Call("TASK_SMART_FLEE_POINT", p, coast.X, coast.Y, coast.Z, 150.0f, 20000);
+            Notify("TSUNAMI WARNING! Wave coming from the " + waveFromText + " (" + U.I((int)dist) + " m)");
+        }
+
+        /// <summary>Direction (flat, unit) and distance to the nearest real water, if any within 700 m.</summary>
+        private static bool FindSea(Vector3 me, out Vector3 dir, out float dist)
+        {
+            dir = new Vector3(); dist = 0f;
+            float[] steps = { 60f, 120f, 200f, 300f, 420f, 560f, 700f };
+            float best = float.MaxValue;
+            for (int i = 0; i < 16; i++)
+            {
+                double a = i * Math.PI / 8.0;
+                Vector3 d = U.V((float)Math.Cos(a), (float)Math.Sin(a), 0f);
+                for (int j = 0; j + 1 < steps.Length; j++)
+                {
+                    if (steps[j] >= best) break;
+                    // Water here AND a step further out, so ponds and fountains don't count.
+                    if (IsWater(me, d, steps[j]) && IsWater(me, d, steps[j + 1]))
+                    {
+                        best = steps[j]; dir = d;
+                        break;
+                    }
+                }
+            }
+            if (best == float.MaxValue) return false;
+            dist = best;
+            return true;
+        }
+
+        private static bool IsWater(Vector3 me, Vector3 d, float r)
+        {
+            Pointer h = new Pointer(typeof(float));
+            return N.Get<bool>("GET_WATER_HEIGHT", false, me.X + d.X * r, me.Y + d.Y * r, me.Z + 50f, h);
+        }
+
+        private static string Compass(Vector3 d)
+        {
+            // IV: +Y is north, +X is east.
+            string[] names = { "east", "north-east", "north", "north-west", "west", "south-west", "south", "south-east" };
+            double a = Math.Atan2(d.Y, d.X);
+            int i = (int)Math.Round(a / (Math.PI / 4.0));
+            return names[((i % 8) + 8) % 8];
+        }
+
+        /// <summary>Runs on the 100 ms chaos tick.</summary>
+        private void TickTsunami(Ped ped, float k)
+        {
+            if (tsunamiPhase == 0) return;
+            Vector3 me = ped.Position;
+            if (tsunamiPhase == 1)
+            {
+                int left = (tsunamiWarnUntil - now + 999) / 1000;
+                if (left > 0) { if ((tsunamiWarnUntil - now) % 2000 < 110) Notify("Tsunami from the " + waveFromText + " in " + left + "s!"); }
+                else { tsunamiPhase = 2; Notify("TSUNAMI!"); }
+                if (now >= tsunamiRumbleAt) { tsunamiRumbleAt = now + 500; N.Call("SHAKE_PAD", 0, 200, 40); }
+                return;
+            }
+
+            float speed = WaveSpeeds[waveSpeed];
+            waveFront += speed * 0.1f * k;
+            if (waveFront > WaveEnd) { EndTsunami(); Notify("The water calms down"); return; }
+
+            float rel = U.Dot(U.Sub(me, waveOrigin), waveDir);      // where you are along the wave's path
+            float gap = waveFront - rel;                            // < 0: still coming; > 0: it has passed you
+            if (now >= tsunamiRumbleAt && Math.Abs(gap) < 80f)
+            {
+                tsunamiRumbleAt = now + 250;
+                N.Call("SHAKE_PAD", 0, 300, (int)(60 + 180 * (1f - Math.Abs(gap) / 80f)));
+            }
+            if (now >= tsunamiSprayAt) { tsunamiSprayAt = now + 300; MoveSpray(me, Math.Abs(gap) < 150f); }
+
+            float reach = Math.Min(150f, chaosRadius * 1.5f);
+            foreach (Vehicle v in ChaosCars(me, reach)) Surge(v, null, speed, k);
+            foreach (Ped p in ChaosPeds(me, reach, true)) Surge(null, p, speed, k);
+
+            if (waveHitsMe)
+            {
+                Vehicle mine = CurrentVehicle();
+                if (mine != null) Surge(mine, null, speed, k);
+                else Surge(null, ped, speed, k);
+            }
+        }
+
+        /// <summary>Lift and carry one car or person if the wave (or its flood) is where they are.</summary>
+        private void Surge(Vehicle v, Ped p, float speed, float k)
+        {
+            Vector3 pos = v != null ? v.Position : p.Position;
+            float a = U.Dot(U.Sub(pos, waveOrigin), waveDir);
+            float behind = waveFront - a;                           // metres behind the front
+            if (behind < 0f || behind > WaveBand + FloodBand) return;
+            float height = pos.Z - waveBaseZ;
+
+            if (behind <= WaveBand)
+            {
+                // The crest: carry toward the wave's speed, lift up to the wave height.
+                float crest = 1f - behind / WaveBand;
+                float along = 0f;
+                if (v != null)
+                {
+                    Pointer vp = new Pointer(typeof(Vector3));
+                    if (N.Call("GET_CAR_SPEED_VECTOR", v, vp, false)) along = U.Dot((Vector3)vp, waveDir);   // flag 0 = world space
+                }
+                float target = speed * (0.7f + 0.3f * crest);
+                float push = Math.Max(0f, target - along) * 0.35f;
+                float lift = 0.98f + (height < WaveHeight[waveSize] ? WaveLift[waveSize] * crest : -0.2f);   // 0.98 cancels gravity per tick
+                Vector3 dv = U.Mul(U.Add(U.Mul(waveDir, push), U.V(0f, 0f, lift)), k);
+                if (v != null)
+                {
+                    PushCar(v, dv);
+                    // Now and then push at the roof (local offset 0,0,1.2) so cars tumble.
+                    if (rng.Next(100) < 12)
+                        N.Call("APPLY_FORCE_TO_CAR", v, 3, waveDir.X * 1.5f, waveDir.Y * 1.5f, 0f, 0f, 0f, 1.2f, 0, 0, 1, 1);
+                }
+                else FlingPed(p, U.Mul(U.Add(U.Mul(waveDir, Math.Min(push, 3f)), U.V(0f, 0f, 0.5f + 0.8f * crest)), k));
+            }
+            else if (v != null)
+            {
+                // The flood behind it: cars float a little and drift with a slow current.
+                PushCar(v, U.Mul(U.Add(U.Mul(waveDir, 0.25f), U.V(0f, 0f, height < 1.5f ? 0.75f : 0.45f)), k));
+            }
+        }
+
+        // Spray along the part of the front nearest you, using Rockstar's car-wash water effects.
+        private void MoveSpray(Vector3 me, bool show)
+        {
+            foreach (int id in sprays) N.Call("STOP_PTFX", id);   // what Rockstar's car wash does to end these effects
+            sprays.Clear();
+            if (!show) return;
+            float across = U.Dot(U.Sub(me, waveOrigin), wavePerp);
+            Vector3 onFront = U.Add(U.Add(waveOrigin, U.Mul(waveDir, waveFront)), U.Mul(wavePerp, across));
+            for (int i = -2; i <= 2; i++)
+            {
+                Vector3 at = U.Add(onFront, U.Mul(wavePerp, i * 14f));
+                string fx = (i & 1) == 0 ? "water_carwash_mist" : "water_carwash_jets";
+                // START_PTFX(name, x, y, z, rot x, rot y, rot z, scale): Rockstar passes the scale as a float (1.0).
+                int id = N.Get<int>("START_PTFX", 0, fx, at.X, at.Y, waveBaseZ + 1.5f, 0f, 0f, 0f, 3.0f);
+                if (id != 0) sprays.Add(id);
+            }
+        }
+
+        private void EndTsunami()
+        {
+            if (tsunamiPhase == 0) return;
+            tsunamiPhase = 0;
+            foreach (int id in sprays) N.Call("STOP_PTFX", id);   // what Rockstar's car wash does to end these effects
+            sprays.Clear();
+            N.Call("FORCE_WIND", -1.0f);                      // back to the game's wind (Rockstar uses -1)
+            if (!weatherRoulette) N.Call("RELEASE_WEATHER");
         }
     }
 

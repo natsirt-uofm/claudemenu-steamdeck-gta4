@@ -4,7 +4,7 @@ ClaudeMenu is a trainer for GTA IV that you drive completely from a gamepad: ope
 
 It reads the controller directly through XInput instead of the game's key bindings. Under Proton, Steam Input shows the Deck's controls to the game as an Xbox 360 pad, so button combos work the same whatever the in-game control settings are.
 
-**Status (1.3.0):** 1.1.6 was tested on a real Steam Deck (SteamOS, Proton 8.0-103, GTA IV 1.0.8.0, ScriptHook 0.5.1, ScriptHookDotNet 1.7.2.0 BETA): the menu loads, draws and responds to the controller, and walking is normal. 1.2.0 brought back **Super Run** and **Super Jump**, reworked the **car multipliers**, made the menu translucent and kept the camera usable while the menu is open. 1.3.0 adds a **Chaos** section with world-changing modes, headed by a Carmageddon-style **Car Magnet**. All of this uses techniques from working GTA IV mods (see [Credits](#credits-and-references)). **None of the 1.2.0 or 1.3.0 changes have been tested on the Deck yet.** They're all off by default, and **Live Debug** (Misc or Performance) shows what the movement features see each frame. If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
+**Status (1.4.0):** 1.1.6 was tested on a real Steam Deck (SteamOS, Proton 8.0-103, GTA IV 1.0.8.0, ScriptHook 0.5.1, ScriptHookDotNet 1.7.2.0 BETA): the menu loads, draws and responds to the controller, and walking is normal. 1.2.0 brought back **Super Run** and **Super Jump**, reworked the **car multipliers**, made the menu translucent and kept the camera usable while the menu is open. 1.3.0 added a **Chaos** section with world-changing modes, headed by a Carmageddon-style **Car Magnet**, and 1.4.0 adds a built-in **Tsunami**. All of this uses techniques from working GTA IV mods (see [Credits](#credits-and-references)). **None of the 1.2.0–1.4.0 changes have been tested on the Deck yet.** They're all off by default, and **Live Debug** (Misc or Performance) shows what the movement features see each frame. If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
 
 ## Controls
 
@@ -42,6 +42,7 @@ You can rebind the open, close and nitro buttons in-game under **Settings**: cho
   - **Forces of nature:** Black Hole, Tornado, Earthquake (with controller rumble), Repulsor Field, Meteor Shower, Time Lapse, Weather Roulette
   - **People:** Riot (people arm themselves and fight; optionally you too), Everyone Flees, Launch People, Set People on Fire, Everyone Out of Their Cars
   - **One-shots:** Launch Cars Up, Shockwave, Explode Nearby Cars, Mass Breakdown, Clean Up Rain Cars
+  - **Tsunami:** Send a Tsunami. A storm-surge wave rolls in from the real nearest sea and carries cars and people away. Wave Size (about 4 / 8 / 15 m), Wave Speed (15 / 22 / 35 m/s), Wave Comes From (Nearest Sea / Behind Me / Ahead of Me), Wave Hits Me Too, Stop Tsunami.
   - **Stop All Chaos**, plus Chaos Radius (30–150 m) and Chaos Strength (1–10). A red **CHAOS** badge at the top of the screen lists what's running.
 - **Teleport:** map waypoint (finds the ground), forward and up nudges, 29 Liberty City landmarks across Algonquin, Broker & Dukes, Bohan and Alderney, 6 save/load slots and your own named locations from the INI
 - **Misc:** hide HUD and radar, hide radar only, coordinates, FPS counter, **Live Debug**, free camera (fly with the sticks, A teleports you there), speedometer and units
@@ -97,6 +98,15 @@ Chaos borrows ideas and force sizes from two GTA IV chaos mods with public sourc
 - **Riot** changes each rioter's own relationships (`SET_CHAR_RELATIONSHIP`), so switching it off undoes exactly that (`CLEAR_CHAR_RELATIONSHIP`). Invisible Traffic shows the cars again, Weather Roulette hands the weather back to the game, and Mad Drivers switches off.
 - **Stop All Chaos** does all of the above at once.
 
+**Tsunami.** GTA IV can't raise the sea from a script: there's no water-level native, and ScriptHookDotNet's memory helper is private, so a real flood would mean writing to unknown memory addresses. ClaudeMenu doesn't fake one. Instead it stages a storm-surge wave:
+
+1. **Warning (8 s):** it finds the real nearest sea by probing 16 directions with `GET_WATER_HEIGHT`. Water must show up at two distances, so ponds don't count. Then it switches to a thunderstorm and turns the wind to full with `FORCE_WIND(1.0)`, which also roughens the real ocean (Rockstar's scripts use 0–1 here). People near you run from the coast, and a countdown tells you where the wave is coming from.
+2. **The wave:** a straight front sweeps in from that sea and past you. In the 30 m behind the front, cars and people are lifted up to the wave height and carried toward the wave's speed, cars get tumbled, and Rockstar's car-wash water effects (`water_carwash_mist` / `_jets`) spray along the front. The controller rumbles as it gets close.
+3. **The flood behind it:** cars float a little and drift with a slow current.
+4. **After:** wind and weather go back to the game (`FORCE_WIND(-1)`, `RELEASE_WEATHER`).
+
+By default the wave flows around you and your car. Switch on **Wave Hits Me Too** to be swept away as well.
+
 Heavy combinations (Car Rain + Meteors + Riot at full strength) can push GTA IV hard on a Deck. Lower Chaos Strength or Radius if the frame rate drops.
 
 ### What GTA IV can't do (so ClaudeMenu doesn't pretend to)
@@ -104,6 +114,7 @@ Heavy combinations (Car Rain + Meteors + Riot at full strength) can push GTA IV 
 - **Windows can't be rolled down or up**: there's no native for it. You can smash or remove them, and Repair restores them.
 - **IV can't tell which extras a model has.** Extras 1–9 are always listed; the ones a model doesn't have do nothing.
 - **Gravity is on or off**: there's no low-gravity setting.
+- **The sea level can't be raised.** There's no water-level native and no safe way to change it from a script, so the Tsunami is a wave that carries cars and people, not a flooded city.
 - **Explosive hits** only work on people and vehicles you damage (IV has no bullet-impact native, so walls and the ground don't explode).
 - **No animation-speed fast run.** `SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER` freezes the walk cycle on the Deck (even at 1.0), and writing the player's velocity on the ground freezes it too. Super Run and Super Jump push instead (see above).
 - **Liveries** only exist on some models (taxis, police and a few others).
@@ -281,6 +292,7 @@ These are the problems we hit on a real Deck, in the order we hit them.
 - **Super Run / Super Jump do nothing.** Turn on **Live Debug** and check the FOOT line. `run btn` and `jump btn` should say Y while you hold sprint (A) and jump (X). If they don't, set your buttons under **Settings → Set Sprint Button / Set Jump Button**. If they do and it shows `run push` / `jump push` but nothing happens, raise **Run Boost / Jump Boost**. The log records each attempt (`Super run: top speed …`, `Super jump: rose … m`).
 - **Chaos is too much, or the frame rate drops.** Chaos → **Stop All Chaos** switches everything off. Then lower **Chaos Radius** / **Chaos Strength** before turning modes back on. The red CHAOS badge at the top of the screen shows what's still running.
 - **Rain cars are piling up.** Chaos → **Clean Up Rain Cars**.
+- **The tsunami came from a strange direction, or "No sea found nearby".** It uses the closest real water within 700 m. Inland, or if water isn't found, it comes from behind you. Set **Wave Comes From** to choose. **Stop Tsunami** ends it at once and gives the weather back.
 - **Walking feels wrong.** Turn Super Run off. With it off ClaudeMenu doesn't touch your movement at all, and if walking is still odd, send the log.
 - **Free camera says it isn't working.** The camera couldn't be created in your setup; the log has the details. Everything else keeps working.
 - **The text sits a bit off in its rows.** Change **Settings → Menu Size**.
@@ -322,7 +334,7 @@ ClaudeMenu borrows *techniques*, not code, from GTA IV mods whose source is publ
 - **XMC mod menu** (EmmanuelU/xmc-mod-menu): super run and super jump with `APPLY_FORCE_TO_PED` while a button is held, the per-frame `SET_CAR_FORWARD_SPEED(speed × 1.02)` "NFS mode", and `SET_CAMERA_CONTROLS_DISABLED_WITH_PLAYER_CONTROLS` to keep the camera while the player is frozen.
 - **ChaosIV** (bountifulellie/ChaosIV) and **TORISOUP's GTA4 Inferno scripts** ("Parupunte"): how much force it takes to move peds and cars in IV, re-applying a ped's velocity over several ticks, collision proofing for falls, and most of the Chaos ideas: jumpy, floaty and crazy traffic, earthquake, repulsion, launches, flee, coloured traffic, mass breakdown. **GTA V's Carmageddon mod** inspired Car Magnet.
 - **LotsofEds' IV mods** (MoveImproveIV-SDK, IVMouseWheelThrottle): per-frame forces on the player's car, and reading forward speed from `GET_CAR_SPEED_VECTOR(…, true)`.
-- **Rockstar's decompiled mission scripts** (0x52617665/GTAIVMissionScripts): how the game itself calls `APPLY_FORCE_TO_CAR` and `GET_CAR_SPEED_VECTOR`.
+- **Rockstar's decompiled mission scripts** (0x52617665/GTAIVMissionScripts): how the game itself calls `APPLY_FORCE_TO_CAR`, `GET_CAR_SPEED_VECTOR`, `FORCE_WIND` and `SHAKE_PAD`, and the car wash's water effects and how it starts and stops them (`START_PTFX` / `STOP_PTFX`), which the Tsunami's spray uses.
 - **HappinessMP's native docs** (HappinessMP/natives): the real argument names of `APPLY_FORCE_TO_CAR` / `APPLY_FORCE_TO_PED` (force, offset, component, local force, local offset, scale by mass).
 - **ScriptHookDotNet** (Tomasak/gta4_scripthookdotnet) and **FusionFix**'s native table: the API and native signatures every call here is checked against.
 
