@@ -618,7 +618,7 @@ namespace ClaudeMenu
                 sb.AppendLine("CloseCombo=" + Btn.ToText(CloseCombo));
                 sb.AppendLine("; Hold while driving for nitro (the Deck's back grips can be mapped to L3 in Steam Input)");
                 sb.AppendLine("NitroButton=" + Btn.ToText(NitroCombo));
-                sb.AppendLine("; The game's jump button, used by Super Jump (X on an Xbox-style pad)");
+                sb.AppendLine("; Unused since Super Jump was removed (kept so old INI files still load)");
                 sb.AppendLine("JumpButton=" + Btn.ToText(JumpButton));
                 sb.AppendLine("FreezePlayerWhileOpen=" + U.B(FreezePlayer));
                 sb.AppendLine("StickNavigation=" + U.B(StickNavigation));
@@ -637,8 +637,8 @@ namespace ClaudeMenu
                 sb.AppendLine("SpeedUnits=" + (SpeedUnits == 1 ? "mph" : "kmh"));
                 sb.AppendLine();
                 sb.AppendLine("[Performance]");
-                sb.AppendLine("; Advanced: multiplies every force the tuning code adds (0.1 - 5.0). Leave at 1.0 unless");
-                sb.AppendLine("; the multipliers feel far too weak or too strong in your setup.");
+                sb.AppendLine("; Advanced: scales the speed kicks (power, brakes, nitro) and experimental assists (0.1 - 5.0).");
+                sb.AppendLine("; Leave at 1.0 unless the multipliers feel far too weak or too strong in your setup.");
                 sb.AppendLine("ForceScale=" + U.F(ForceScale, "0.00"));
                 sb.AppendLine();
                 sb.AppendLine("[Teleport]");
@@ -1251,7 +1251,7 @@ namespace ClaudeMenu
 
     public partial class MenuScript : Script
     {
-        private const string Version = "1.1.0";
+        private const string Version = "1.1.6";
 
         private readonly Config cfg = new Config();
         private readonly InputState input = new InputState();
@@ -1540,11 +1540,18 @@ namespace ClaudeMenu
             return v;
         }
 
+        // HandleObject.Handle is internal in ScriptHookDotNet; scripts can only read
+        // it through the public GTA.base.iHandleObject interface.
+        private static int H(GTA.@base.iHandleObject o)
+        {
+            return o == null ? 0 : o.Handle;
+        }
+
         private static bool IsDriver(Vehicle v, Ped ped)
         {
             Pointer p = new Pointer(typeof(int));
-            if (!N.Call("GET_DRIVER_OF_CAR", v, p)) return true;   // can't tell: assume yes
-            return (int)p == ped.Handle;
+            if (!N.Call("GET_DRIVER_OF_CAR", v, p)) return false;   // can't tell: don't touch the car
+            return (int)p == H(ped);
         }
 
         private static string Pretty(string model)
@@ -1972,12 +1979,8 @@ namespace ClaudeMenu
     public partial class MenuScript
     {
         private bool godMode, neverWanted, policeIgnore, everyoneIgnore, infSprint;
-        private bool noRagdoll, noBikeFall, noDragOut, seatbelt, autoHeal, autoArmour, superJump;
-        private int runSpeedIndex;
-        private int jumpWatchUntil;
+        private bool noRagdoll, noBikeFall, noDragOut, seatbelt, autoHeal, autoArmour;
 
-        private static readonly float[] RunSpeeds = { 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f };
-        private static readonly string[] RunSpeedNames = { "1.0x", "1.25x", "1.5x", "2.0x", "2.5x", "3.0x" };
         private static readonly int[] CashAmounts = { 1000, 10000, 100000, 1000000, 10000000 };
         private static readonly string[] CashNames = { "$1,000", "$10,000", "$100,000", "$1,000,000", "$10,000,000" };
 
@@ -2014,13 +2017,6 @@ namespace ClaudeMenu
             m.Add(new ToggleItem("Everyone Ignores You", () => everyoneIgnore, v => { everyoneIgnore = v; N.Call("SET_EVERYONE_IGNORE_PLAYER", pi, v); }));
 
             m.Header("Abilities");
-            m.Add(new ToggleItem("Super Jump", () => superJump, SetSuperJump, "Jump (" + Btn.ToText(cfg.JumpButton) + ") launches you high. Fall damage is off while this is on"));
-            m.Add(new ListItem("Fast Run", RunSpeedNames, () => runSpeedIndex, v =>
-            {
-                runSpeedIndex = v;
-                Ped p = PlayerPed();
-                if (p != null) N.Call("SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER", p, RunSpeeds[v]);
-            }, true, "Speeds up walking/running animations (GTA IV's only run-speed control)"));
             m.Add(new ToggleItem("Unlimited Sprint", () => infSprint, v => { infSprint = v; N.Call("SET_PLAYER_NEVER_GETS_TIRED", pi, v); }));
             m.Add(new ToggleItem("No Ragdoll", () => noRagdoll, v =>
             {
@@ -2114,32 +2110,9 @@ namespace ClaudeMenu
             Notify("You are now " + label);
         }
 
-        private void SetSuperJump(bool v)
-        {
-            superJump = v;
-            Ped p = PlayerPed();
-            // SET_CHAR_PROOFS(ped, ?, fallingDamage, ?, ?, ?): only the second flag is used here.
-            if (p != null) N.Call("SET_CHAR_PROOFS", p, false, v, false, false, false);
-        }
-
         private void RunPlayerFrame(Ped ped)
         {
             if (neverWanted) N.Call("CLEAR_WANTED_LEVEL", pi);
-
-            if (superJump && !open && !freecamOn)
-            {
-                bool jumpPressed = Btn.Count(cfg.JumpButton) == 1 ? input.Pressed(cfg.JumpButton) : input.ComboPressed(cfg.JumpButton);
-                if (jumpPressed && N.Get<bool>("IS_CHAR_ON_FOOT", false, ped)) jumpWatchUntil = now + 700;
-                if (jumpWatchUntil != 0 && now < jumpWatchUntil && N.Get<bool>("IS_CHAR_IN_AIR", false, ped))
-                {
-                    // Boost the jump the game already started, keeping its direction.
-                    Pointer vx = new Pointer(typeof(float)), vy = new Pointer(typeof(float)), vz = new Pointer(typeof(float));
-                    if (N.Call("GET_CHAR_VELOCITY", ped, vx, vy, vz))
-                        N.Call("SET_CHAR_VELOCITY", ped, (float)vx * 1.7f, (float)vy * 1.7f, 14.0f);
-                    jumpWatchUntil = 0;
-                }
-                else if (jumpWatchUntil != 0 && now >= jumpWatchUntil) jumpWatchUntil = 0;
-            }
         }
 
         private void RunPlayerSlow(Ped ped)
@@ -2156,9 +2129,7 @@ namespace ClaudeMenu
                 if (armour < 100) N.Call("ADD_ARMOUR_TO_CHAR", ped, 100 - armour);
             }
             if (infSprint) N.Call("SET_PLAYER_NEVER_GETS_TIRED", pi, true);
-            if (runSpeedIndex != 0) N.Call("SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER", ped, RunSpeeds[runSpeedIndex]);
             if (noRagdoll) N.Call("UNLOCK_RAGDOLL", ped, false);
-            if (superJump) N.Call("SET_CHAR_PROOFS", ped, false, true, false, false, false);
             if (noBikeFall) N.Call("SET_CHAR_CAN_BE_KNOCKED_OFF_BIKE", ped, false);
         }
     }
@@ -2276,14 +2247,14 @@ namespace ClaudeMenu
                 Vehicle mine = CurrentVehicle();
                 foreach (Ped p in World.GetPeds(pos, 60f))
                 {
-                    if (p == null || !p.Exists() || p.Handle == ped.Handle) continue;
+                    if (p == null || !p.Exists() || H(p) == H(ped)) continue;
                     if (!N.Get<bool>("HAS_CHAR_BEEN_DAMAGED_BY_CHAR", false, p, ped, false)) continue;
                     if (explode) Boom(p.Position);
                     N.Call("CLEAR_CHAR_LAST_DAMAGE_ENTITY", p);
                 }
                 foreach (Vehicle v in World.GetVehicles(pos, 60f))
                 {
-                    if (v == null || !v.Exists() || (mine != null && v.Handle == mine.Handle)) continue;
+                    if (v == null || !v.Exists() || (mine != null && H(v) == H(mine))) continue;
                     if (!N.Get<bool>("HAS_CAR_BEEN_DAMAGED_BY_CHAR", false, v, ped)) continue;
                     if (explode) Boom(v.Position);
                     N.Call("CLEAR_CAR_LAST_DAMAGE_ENTITY", v);
@@ -2698,8 +2669,7 @@ namespace ClaudeMenu
             ActionItem rebOpen = new ActionItem("Rebind Open Combo", () => StartCapture(1));
             ActionItem rebClose = new ActionItem("Rebind Close Combo", () => StartCapture(2));
             ActionItem rebNitro = new ActionItem("Rebind Nitro Button", () => StartCapture(3));
-            ActionItem rebJump = new ActionItem("Set Jump Button", () => StartCapture(4));
-            m.Add(rebOpen); m.Add(rebClose); m.Add(rebNitro); m.Add(rebJump);
+            m.Add(rebOpen); m.Add(rebClose); m.Add(rebNitro);
             m.Add(new ToggleItem("Freeze Player While Open", () => cfg.FreezePlayer, v =>
             {
                 cfg.FreezePlayer = v;
@@ -2732,7 +2702,6 @@ namespace ClaudeMenu
                 rebOpen.Help = "Current: " + Btn.ToText(cfg.OpenCombo);
                 rebClose.Help = "Current: " + Btn.ToText(cfg.CloseCombo);
                 rebNitro.Help = "Current: " + Btn.ToText(cfg.NitroCombo) + ". One button is fine";
-                rebJump.Help = "Tell Super Jump which button jumps in your controls. Current: " + Btn.ToText(cfg.JumpButton);
             };
             return m;
         }
@@ -2778,12 +2747,12 @@ namespace ClaudeMenu
         {
             int model = N.OutInt("GET_CAR_MODEL", 0, v);
             VehState st;
-            if (!vehStates.TryGetValue(v.Handle, out st) || st.Model != model)
+            if (!vehStates.TryGetValue(H(v), out st) || st.Model != model)
             {
                 // New vehicle, or the handle was reused by a different model: start fresh.
                 st = new VehState();
                 st.Model = model;
-                vehStates[v.Handle] = st;
+                vehStates[H(v)] = st;
             }
             if (st.Kind == 0 && model != 0)
                 st.Kind = (N.Get<bool>("IS_THIS_MODEL_A_CAR", false, model) || N.Get<bool>("IS_THIS_MODEL_A_BIKE", false, model)) ? 1 : 2;
@@ -2897,9 +2866,9 @@ namespace ClaudeMenu
         {
             Ped p = PlayerPed();
             if (p != null && N.Get<bool>("IS_CHAR_IN_CAR", false, p, v)) p.Position = U.Add(v.Position, U.V(0f, 0f, 2.0f));
-            vehStates.Remove(v.Handle);
+            vehStates.Remove(H(v));
             spawned.Remove(v);
-            if (lastSpawned != null && lastSpawned.Handle == v.Handle) lastSpawned = null;
+            if (lastSpawned != null && H(lastSpawned) == H(v)) lastSpawned = null;
             v.Delete();
         }
 
@@ -3045,7 +3014,7 @@ namespace ClaudeMenu
             Vector3 basePos = old != null ? old.Position : ped.Position;
 
             // Step out of the current vehicle first if we're going to warp or delete it.
-            bool oldIsLastSpawn = old != null && lastSpawned != null && lastSpawned.Exists() && old.Handle == lastSpawned.Handle;
+            bool oldIsLastSpawn = old != null && lastSpawned != null && lastSpawned.Exists() && H(old) == H(lastSpawned);
             if (old != null && (warpIntoSpawned || (replaceLastSpawn && oldIsLastSpawn)))
                 ped.Position = U.Add(basePos, U.V(0f, 0f, 2.5f));
 
@@ -3334,29 +3303,35 @@ namespace ClaudeMenu
     //
     //  GTA IV has no native for engine power, torque or brake force (no GTA V-style
     //  SET_VEHICLE_ENGINE_POWER_MULTIPLIER), and editing handling data in memory is
-    //  version-specific and unsafe from a loose script. So the multipliers are an
-    //  assist: every frame we add a small velocity change with APPLY_FORCE_TO_CAR.
+    //  version-specific and unsafe from a loose script.
     //
-    //  ScriptHookDotNet's own Vehicle.Velocity setter calls APPLY_FORCE_TO_CAR with
-    //  force type 3 and the velocity difference, i.e. it treats type 3 as a change
-    //  in velocity (m/s). We use it the same way, scaled by the frame time, so the
-    //  push is the same at 30 or 60 fps and grows smoothly with the trigger.
+    //  Rule learned on the Deck: writing the player's or the car's speed, velocity
+    //  or animation state EVERY FRAME fights the game and breaks movement.
+    //   - per-frame APPLY_FORCE_TO_CAR deltas: no visible effect
+    //   - SET_CAR_FORWARD_SPEED every frame: the car didn't move at all
+    //   - SET_CHAR_VELOCITY / SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER on foot: froze walking
     //
-    //   Engine power  extra forward acceleration = (mult - 1) x throttle x 3.5 m/s^2,
-    //                 tapering off at high speed. Only on the ground, never in reverse.
-    //   Brakes        extra deceleration = (mult - 1) x brake x 6 m/s^2 while moving
-    //                 forward; it never pushes you backwards.
-    //   Handbrake     extra deceleration along the direction of travel while the
-    //                 handbrake (RB) is held.
-    //   Grip assist   removes part of the sideways slide each frame.
-    //   Top speed     gently pulls the car back to the limit (it doesn't cut power).
-    //   Nitro         strong forward push while the nitro button is held; the tank
-    //                 drains in ~3.5 s and refills after a short pause.
+    //  So power, brakes, nitro and the top speed limit are "speed kicks": the
+    //  wanted change is summed over KickMs (200 ms) and applied as one
+    //  SET_CAR_FORWARD_SPEED call, at most every KickMs:
+    //   Engine power  (mult - 1) x throttle x 3.5 m/s^2, tapering at high speed.
+    //                 Only once the car is rolling (>= 3 m/s) under its own power.
+    //   Brakes        (mult - 1) x brake x 6 m/s^2 while moving forward; never
+    //                 below 0.5 m/s, so it can't push you into reverse.
+    //   Nitro         a fixed push while the nitro button is held (off by default).
+    //   Top speed     kicks are clamped to the limit; above it, one kick back down.
+    //  No kicks while the menu is open, in the air, with the handbrake held, while
+    //  reversing or nearly stopped, or when you aren't the driver. The first kicks
+    //  are logged as "Power kick: a -> b m/s (why)" in ClaudeMenu.log.
+    //  UNTESTED on the Deck until the owner confirms it.
     //
-    //  Limits: it pushes the whole car, so it doesn't change gear ratios, engine
-    //  sound or wheelspin the way real handling edits would. Throttle is read from
-    //  the controller's triggers (RT/LT) or W/S on a keyboard, so custom bindings
-    //  that move accelerate elsewhere won't drive the multipliers.
+    //  Grip and handbrake assists still use per-frame APPLY_FORCE_TO_CAR, which
+    //  showed no visible effect, so they only run with "Force Assists
+    //  (experimental)" switched on, and that is off by default.
+    //
+    //  Limits: kicks change the car's speed along its nose, so gear ratios,
+    //  engine sound and wheelspin don't change the way real handling edits would.
+    //  Throttle is read from the controller triggers (RT/LT) or W/S on a keyboard.
     //
 
     public partial class MenuScript
@@ -3365,12 +3340,18 @@ namespace ClaudeMenu
         private static readonly float[] NitroAccel = { 7f, 11f, 18f };
         private static readonly string[] NitroNames = { "Mild", "Strong", "Insane" };
 
-        private bool sameTuneEverywhere, nitroEnabled = true, infiniteNitro;
+        private bool sameTuneEverywhere, nitroEnabled, infiniteNitro;   // nitro is off by default: it changes the car's speed
+        private bool forceAssists;   // experimental grip/handbrake forces, off by default
         private int nitroPower = 1;
         private readonly Tuning globalTune = new Tuning();
 
         // Per-frame tracking
         private int trackHandle;
+        private const int KickMs = 200;
+        private const float MinKickSpeed = 3f;   // m/s; no speed-up kicks below this
+        private bool kickWaitLogged;
+        private float kickDv;
+        private int lastKick, kickDiagLeft = 6;
         private Vector3 lastPos, velAvg;
         private float thrAvg, brkAvg;
         private float nitroLevel = 1f;
@@ -3395,6 +3376,8 @@ namespace ClaudeMenu
         private Menu BuildPerformanceMenu()
         {
             Menu m = new Menu("Performance");
+            // Each visit re-arms the "Power kick" log lines, so every test run gets fresh ones.
+            m.OnEnter = menu => { kickDiagLeft = 6; kickWaitLogged = false; };
             m.Add(new InfoItem("Tuning", () =>
             {
                 if (sameTuneEverywhere) return "every vehicle";
@@ -3402,22 +3385,26 @@ namespace ClaudeMenu
                 return v == null ? "(get in a vehicle)" : ModelLabel(StateFor(v).Model);
             }));
 
-            m.Header("Multipliers");
+            m.Header("Multipliers (untested on the Deck)");
             m.Add(new FloatItem("Engine Power", 1f, 10f, 0.5f, () => EditTune().Power, v => EditTune().Power = v, "0.0", "x", null,
-                "Extra push while you hold the throttle; grows with how far you press RT. A resets to 1.0x"));
+                "Speed kicks while you hold RT, once you're rolling (11+ km/h). A resets to 1.0x"));
             m.Add(new FloatItem("Brakes", 1f, 10f, 0.5f, () => EditTune().Brakes, v => EditTune().Brakes = v, "0.0", "x", null,
-                "Stronger braking while moving forward (LT). Never pushes you into reverse"));
-            m.Add(new FloatItem("Handbrake", 1f, 5f, 0.5f, () => EditTune().Handbrake, v => EditTune().Handbrake = v, "0.0", "x", null,
-                "Stronger stopping while the handbrake (RB) is held"));
-            m.Add(new FloatItem("Grip Assist", 0f, 10f, 1f, () => EditTune().Grip, v => EditTune().Grip = (int)Math.Round(v), "0", "", "Off",
-                "Cuts sideways sliding. Higher = more grip; 10 is on rails"));
+                "Stronger braking (LT) while moving forward. Never pushes you into reverse"));
             m.Add(new FloatItem("Top Speed Limit", 0f, 400f, 10f, () => EditTune().TopSpeedKmh, v => EditTune().TopSpeedKmh = (int)Math.Round(v), "0", " km/h", "Off",
-                "Caps your speed smoothly. Raise Engine Power to go faster than stock"));
+                "Power and nitro won't take you past this; above it you're slowed back down"));
 
-            m.Header("Nitro");
-            m.Add(new ToggleItem("Nitro", () => nitroEnabled, v => nitroEnabled = v, "Hold " + Btn.ToText(cfg.NitroCombo) + " while driving. Rebind in Settings"));
+            m.Header("Nitro (untested on the Deck)");
+            m.Add(new ToggleItem("Nitro", () => nitroEnabled, v => nitroEnabled = v, "Off by default. Hold " + Btn.ToText(cfg.NitroCombo) + " while driving. Rebind in Settings"));
             m.Add(new ListItem("Nitro Power", NitroNames, () => nitroPower, v => nitroPower = v, true, null));
             m.Add(new ToggleItem("Infinite Nitro", () => infiniteNitro, v => infiniteNitro = v));
+
+            m.Header("Experimental");
+            m.Add(new ToggleItem("Force Assists (experimental)", () => forceAssists, v => forceAssists = v,
+                "Grip and handbrake below use per-frame forces, which showed no effect on the Deck. Off by default"));
+            m.Add(new FloatItem("Grip Assist", 0f, 10f, 1f, () => EditTune().Grip, v => EditTune().Grip = (int)Math.Round(v), "0", "", "Off",
+                "Experimental: cuts sideways sliding. Only works with Force Assists on"));
+            m.Add(new FloatItem("Handbrake", 1f, 5f, 0.5f, () => EditTune().Handbrake, v => EditTune().Handbrake = v, "0.0", "x", null,
+                "Experimental: stronger stopping with RB. Only works with Force Assists on"));
 
             m.Header("Apply To");
             m.Add(new ToggleItem("Same Tuning on Every Vehicle", () => sameTuneEverywhere, v =>
@@ -3476,7 +3463,7 @@ namespace ClaudeMenu
             // Direction of travel, from how far the car moved since last frame
             // (GET_CAR_SPEED gives the exact magnitude).
             Vector3 pos = CarPosition(v);
-            if (trackHandle != v.Handle) { trackHandle = v.Handle; velAvg = new Vector3(); }
+            if (trackHandle != H(v)) { trackHandle = H(v); velAvg = new Vector3(); kickDv = 0f; }
             else if (dt > 0f)
             {
                 Vector3 raw = U.Mul(U.Sub(pos, lastPos), 1f / dt);
@@ -3484,7 +3471,8 @@ namespace ClaudeMenu
             }
             lastPos = pos;
 
-            if (st.Kind != 1 || !IsDriver(v, ped)) { RefillNitro(); return; }
+            // Only the driver of a car or bike gets tuning; anything else drops pending kicks.
+            if (st.Kind != 1 || !IsDriver(v, ped)) { kickDv = 0f; RefillNitro(); return; }
 
             bool blocked = open || freecamOn || paused;
             bool kb = !input.Connected && cfg.KeyboardFallback;
@@ -3497,25 +3485,79 @@ namespace ClaudeMenu
             brkAvg += (brk - brkAvg) * k;
 
             Tuning tu = TuneFor(st);
-            if (tu.IsStock && !nitroHeld) { RefillNitro(); return; }
+            bool assists = forceAssists && (tu.Grip > 0 || tu.Handbrake > 1.001f);
+            bool kicks = tu.Power > 1.001f || tu.Brakes > 1.001f || tu.TopSpeedKmh > 0 || nitroHeld;
+            if (!kicks && !assists) { kickDv = 0f; RefillNitro(); return; }
 
             Vector3 fwd = CarForward(v);
             Vector3 dir = U.Len(velAvg) > 0.5f ? U.Norm(velAvg) : fwd;
             Vector3 vel = U.Mul(dir, speed);
             float fwdSpeed = U.Dot(vel, fwd);
             bool inAir = N.Get<bool>("IS_CAR_IN_AIR_PROPER", false, v);
+            float scale = cfg.ForceScale;
 
-            float dvF = 0f;               // along the car's nose (relative force)
-            Vector3 dvW = new Vector3();  // world space (absolute force)
-            if (!inAir)
+            // ---- Speed kicks: power, brakes, nitro, top speed limit -------------
+            // Deck tests: per-frame APPLY_FORCE_TO_CAR deltas had no visible effect,
+            // and SET_CAR_FORWARD_SPEED every frame stopped the car moving at all
+            // (writing speed every frame fights the game). So the change is summed
+            // over KickMs and applied as ONE SET_CAR_FORWARD_SPEED call at most
+            // every KickMs. Never while the menu is open, in the air, with the
+            // handbrake held, or while reversing / nearly stopped.
+            bool noKick = blocked || inAir || hb || fwdSpeed < 0.5f;
+            float dvF = 0f;
+            if (!noKick)
             {
-                if (tu.Power > 1.001f && thrAvg > 0.02f && fwdSpeed > -0.5f)
+                bool rolling = fwdSpeed >= MinKickSpeed;   // speed-ups only once rolling under the car's own power
+                if (rolling && tu.Power > 1.001f && thrAvg > 0.02f)
                 {
                     float taper = Math.Max(0.3f, 1f - speed / 90f);
                     dvF += (tu.Power - 1f) * thrAvg * BaseAccel * taper * dt;
                 }
                 if (tu.Brakes > 1.001f && brkAvg > 0.02f && fwdSpeed > 1f)
-                    dvF -= Math.Min((tu.Brakes - 1f) * brkAvg * BaseBrake * dt, fwdSpeed - 0.5f);
+                    dvF -= (tu.Brakes - 1f) * brkAvg * BaseBrake * dt;
+                if (rolling && nitroHeld && nitroLevel > 0f)
+                {
+                    dvF += NitroAccel[nitroPower] * dt;
+                    nitroActive = true;
+                    lastNitroUse = now;
+                    if (!infiniteNitro) nitroLevel = Math.Max(0f, nitroLevel - dt / 3.5f);
+                }
+                else if (!rolling && !kickWaitLogged && ((tu.Power > 1.001f && thrAvg > 0.02f) || nitroHeld))
+                {
+                    kickWaitLogged = true;
+                    Log.Write("Power: no kicks below " + U.F(MinKickSpeed, "0") + " m/s (now " + U.F(fwdSpeed, "0.0") + "); the car has to be rolling first");
+                }
+            }
+            if (!nitroActive) RefillNitro();
+            if (noKick) kickDv = 0f; else kickDv += dvF * scale;
+
+            if (now - lastKick >= KickMs)
+            {
+                lastKick = now;
+                float cap = tu.TopSpeedKmh > 0 ? tu.TopSpeedKmh / 3.6f : 0f;
+                string why = null;
+                float target = fwdSpeed;
+                if (!noKick)
+                {
+                    if (kickDv > 0.05f && fwdSpeed >= MinKickSpeed) { target = fwdSpeed + kickDv; why = nitroActive ? "nitro" : "power"; }
+                    else if (kickDv < -0.05f) { target = Math.Max(0.5f, fwdSpeed + kickDv); why = "brakes"; }
+                    if (cap > 0f && target > cap) { target = Math.Min(target, Math.Max(cap, 0.5f)); why = "top speed limit"; }
+                    if (why == null && cap > 0f && fwdSpeed > cap + 0.5f) { target = cap; why = "top speed limit"; }
+                }
+                if (why != null && Math.Abs(target - fwdSpeed) > 0.05f)
+                {
+                    N.Call("SET_CAR_FORWARD_SPEED", v, target);
+                    if (kickDiagLeft > 0) { kickDiagLeft--; Log.Write("Power kick: " + U.F(fwdSpeed, "0.0") + " -> " + U.F(target, "0.0") + " m/s (" + why + ")"); }
+                }
+                kickDv = 0f;
+            }
+
+            // ---- Experimental force assists: grip and handbrake ------------------
+            // Per-frame APPLY_FORCE_TO_CAR, the approach that showed no visible
+            // effect on the Deck. Off unless "Force Assists (experimental)" is on.
+            if (assists && !blocked && !inAir)
+            {
+                Vector3 dvW = new Vector3();
                 if (tu.Handbrake > 1.001f && hb && speed > 1f)
                     dvW = U.Sub(dvW, U.Mul(dir, Math.Min((tu.Handbrake - 1f) * BaseHandbrake * dt, speed - 0.5f)));
                 if (tu.Grip > 0 && speed > 3f)
@@ -3524,34 +3566,11 @@ namespace ClaudeMenu
                     side = U.V(side.X, side.Y, 0f);
                     dvW = U.Sub(dvW, U.Mul(side, Math.Min(1f, tu.Grip * 1.2f * dt)));
                 }
-                if (nitroHeld && nitroLevel > 0f)
-                {
-                    dvF += NitroAccel[nitroPower] * dt;
-                    nitroActive = true;
-                    lastNitroUse = now;
-                    if (!infiniteNitro) nitroLevel = Math.Max(0f, nitroLevel - dt / 3.5f);
-                }
+                // APPLY_FORCE_TO_CAR(car, type 3, x, y, z, spinX, spinY, spinZ, 0, relative, 1, 1): the
+                // same arguments ScriptHookDotNet's Vehicle.ApplyForce uses.
+                if (U.Len(dvW) > 1e-4f)
+                    N.Call("APPLY_FORCE_TO_CAR", v, 3, dvW.X * scale, dvW.Y * scale, dvW.Z * scale, 0f, 0f, 0f, 0, 0, 1, 1);
             }
-            if (!nitroActive) RefillNitro();
-
-            if (tu.TopSpeedKmh > 0)
-            {
-                float cap = tu.TopSpeedKmh / 3.6f;
-                if (speed > cap)
-                {
-                    if (dvF > 0f) dvF = 0f;
-                    dvW = U.Sub(dvW, U.Mul(dir, (speed - cap) * Math.Min(1f, 4f * dt)));
-                }
-                else if (dvF > 0f && speed + dvF > cap) dvF = Math.Max(0f, cap - speed);
-            }
-
-            float scale = cfg.ForceScale;
-            // APPLY_FORCE_TO_CAR(car, type 3, x, y, z, spinX, spinY, spinZ, 0, relative, 1, 1): the
-            // same arguments ScriptHookDotNet's Vehicle.ApplyForce / ApplyForceRelative use.
-            if (Math.Abs(dvF) > 1e-4f)
-                N.Call("APPLY_FORCE_TO_CAR", v, 3, 0f, dvF * scale, 0f, 0f, 0f, 0f, 0, 1, 1, 1);
-            if (U.Len(dvW) > 1e-4f)
-                N.Call("APPLY_FORCE_TO_CAR", v, 3, dvW.X * scale, dvW.Y * scale, dvW.Z * scale, 0f, 0f, 0f, 0, 0, 1, 1);
         }
 
         private void RefillNitro()

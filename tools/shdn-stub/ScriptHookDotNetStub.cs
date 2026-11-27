@@ -5,9 +5,44 @@
 //
 // Keep it honest: only add members that exist in ScriptHookDotNet 1.7.x
 // (github.com/Tomasak/gta4_scripthookdotnet, ScriptHookDotNet/*.h), with the
-// same names, types and static/instance-ness, so a passing check means
-// something.
+// same names, types, static/instance-ness AND access level (public, protected,
+// internal), so a passing check means something. 1.1.0 failed in game because
+// this stub made HandleObject.Handle public while ScriptHookDotNet keeps it
+// internal.
 using System;
+
+namespace GTA.@base
+{
+    // interfaces.h
+    public interface iBaseObject
+    {
+        bool Exists();
+    }
+
+    // interfaces.h: the only public way to read an object's handle.
+    public interface iHandleObject : IEquatable<iHandleObject>, iBaseObject
+    {
+        int Handle { get; }
+        object Metadata { get; }
+    }
+
+    // bObject.h
+    public abstract class Object
+    {
+        public bool Exists() { return true; }
+    }
+
+    // bHandleObject.h: Handle is declared under "internal:" and implements
+    // iHandleObject::Handle explicitly, so scripts can't call obj.Handle.
+    public abstract class HandleObject : Object, iHandleObject, IEquatable<HandleObject>
+    {
+        internal int Handle { get { return 0; } }
+        int iHandleObject.Handle { get { return 0; } }
+        public object Metadata { get { return null; } }
+        public bool Equals(HandleObject other) { return false; }
+        public bool Equals(iHandleObject other) { return false; }
+    }
+}
 
 namespace GTA
 {
@@ -32,15 +67,8 @@ namespace GTA
         public Model(string name) { }
     }
 
-    // bObject.h / bHandleObject.h
-    public abstract class HandleObject
-    {
-        public int Handle { get { return 0; } }
-        public bool Exists() { return true; }
-    }
-
     // Ped.h
-    public sealed class Ped : HandleObject
+    public sealed class Ped : GTA.@base.HandleObject
     {
         public Vector3 Position { get; set; }
         public float Heading { get; set; }
@@ -51,7 +79,7 @@ namespace GTA
     }
 
     // Vehicle.h
-    public sealed class Vehicle : HandleObject
+    public sealed class Vehicle : GTA.@base.HandleObject
     {
         public Vector3 Position { get; set; }
         public float Heading { get; set; }
@@ -61,13 +89,13 @@ namespace GTA
     }
 
     // Blip.h
-    public sealed class Blip : HandleObject
+    public sealed class Blip : GTA.@base.HandleObject
     {
         public Vector3 Position { get { return new Vector3(); } }
     }
 
     // Camera.h
-    public sealed class Camera : HandleObject
+    public sealed class Camera : GTA.@base.HandleObject
     {
         public Camera() { }
         public Vector3 Position { get; set; }
@@ -81,7 +109,6 @@ namespace GTA
     public sealed class Player
     {
         public Ped Character { get { return null; } }
-        public int WantedLevel { get; set; }
         public void TeleportTo(float x, float y) { }
     }
 
@@ -96,7 +123,6 @@ namespace GTA
     // World.h
     public static class World
     {
-        public static TimeSpan CurrentDayTime { get; set; }
         public static Vehicle CreateVehicle(Model model, Vector3 position) { return null; }
         public static Ped[] GetPeds(Vector3 position, float radius) { return new Ped[0]; }
         public static Vehicle[] GetVehicles(Vector3 position, float radius) { return new Vehicle[0]; }
@@ -128,14 +154,14 @@ namespace GTA
 
     public delegate void GraphicsEventHandler(object sender, GraphicsEventArgs e);
 
-    // Script.h
+    // Script.h (Interval and Wait are protected there)
     public abstract class Script
     {
-        public int Interval { get; set; }
+        protected int Interval { get; set; }
         public event EventHandler Tick;
         public event GraphicsEventHandler PerFrameDrawing;
         protected void RaisePerFrameDrawing() { if (PerFrameDrawing != null) PerFrameDrawing(this, new GraphicsEventArgs()); }
-        public void Wait(int ms) { }
+        protected void Wait(int ms) { }
         protected void RaiseTick() { if (Tick != null) Tick(this, EventArgs.Empty); }
     }
 }
