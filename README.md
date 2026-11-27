@@ -4,7 +4,7 @@ ClaudeMenu is a trainer for GTA IV that you drive completely from a gamepad: ope
 
 It reads the controller directly through XInput instead of the game's key bindings. Under Proton, Steam Input shows the Deck's controls to the game as an Xbox 360 pad, so button combos work the same whatever the in-game control settings are.
 
-**Status (1.1.6):** tested on a real Steam Deck (SteamOS, Proton 8.0-103, GTA IV 1.0.8.0, ScriptHook 0.5.1, ScriptHookDotNet 1.7.2.0 BETA): the menu loads, draws and responds to the controller, and walking is normal. Fast run and super jump were removed after Deck testing showed GTA IV can't do them (see below). **The performance multipliers and nitro are untested on the Deck**, and so is the rest of the vehicle tuning. If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
+**Status (1.2.0):** 1.1.6 was tested on a real Steam Deck (SteamOS, Proton 8.0-103, GTA IV 1.0.8.0, ScriptHook 0.5.1, ScriptHookDotNet 1.7.2.0 BETA): the menu loads, draws and responds to the controller, and walking is normal. 1.2.0 brings back **Super Run** and **Super Jump** and reworks the **car multipliers**, both using the techniques working GTA IV trainers use (see [Credits](#credits-and-references)). It also makes the menu translucent and keeps the camera usable while the menu is open. **None of the 1.2.0 changes have been tested on the Deck yet.** They're all off by default, and **Live Debug** (Misc or Performance) shows what they see each frame. If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
 
 ## Controls
 
@@ -18,46 +18,67 @@ It reads the controller directly through XInput instead of the game's key bindin
 | Change value | D-pad left / right | Left / Right |
 | Back | B | Backspace |
 | **Nitro** (while driving; off by default) | **L3** (click the left stick) | |
+| **Super Run** (when on) | hold **A** (sprint) while moving | |
+| **Super Jump** (when on) | hold **X** (jump) | |
+| Look around while the menu is open | right stick | |
 
-You can rebind the open, close and nitro buttons in-game under **Settings**: choose one, hold the new button(s), then let go. You can also change them in `ClaudeMenu.ini`. By default your character is frozen while the menu is open, so menu buttons don't also make Niko jump, sprint or open the phone. You can turn this off in Settings.
+You can rebind the open, close and nitro buttons in-game under **Settings**: choose one, hold the new button(s), then let go. If you moved sprint or jump in Steam Input or the game, tell ClaudeMenu under **Settings → Set Sprint Button / Set Jump Button**. You can also change all of them in `ClaudeMenu.ini`. By default your character is frozen while the menu is open, so menu buttons don't also make Niko jump, sprint or open the phone. The right stick still turns the camera (**Settings → Camera Moves While Open**). You can turn the freeze off in Settings.
 
 **Steam Deck tips:** in Steam Input, set one back grip (L4/R4/L5/R5) to press LB+RB+X at once so a single paddle opens the menu, and another to L3 for nitro.
 
 ## Features
 
-- **Player:** god mode, refill health and armour, auto heal, keep armour full, kill player; never wanted, set wanted level, police ignore you, everyone ignores you; unlimited sprint, no ragdoll, ragdoll now, never fall off bike, can't be dragged out, seatbelt; change player model (story characters, police, gangs, civilians); cash (see it, add, remove, set to $0)
+- **Player:** god mode, refill health and armour, auto heal, keep armour full, kill player; never wanted, set wanted level, police ignore you, everyone ignores you; **Super Run** and **Super Jump** (experimental, adjustable boost), unlimited sprint, no ragdoll, ragdoll now, never fall off bike, can't be dragged out, seatbelt; change player model (story characters, police, gangs, civilians); cash (see it, add, remove, set to $0)
 - **Vehicles:**
   - **Spawner:** 11 categories (about 150 models, including EFLC ones), plus a controller-friendly **search** (pick letters with the D-pad). Models missing from your episode are marked and skipped safely. Spawn driving it or parked in front of you, replace your last spawn, delete the last or all spawned vehicles.
   - **Customs garage:** primary, secondary, specular and trim colour from GTA IV's full 137-colour palette with names and swatches, previewed live as you scroll (A keeps it, B puts the old colour back); random paint; extras 1–9 on/off; livery; dirt level; open, close or break off each door, the hood and trunk; smash or remove windows; repair, wash, burst/fix tyres, bulletproof tyres; engine off; bulletproof, fireproof, explosion-, collision- and melee-proof.
-  - **Performance (untested on the Deck):** engine power and brake multipliers (1.0x–10.0x in 0.5 steps), a top speed limit, and nitro (off by default) with a tank, three power levels and an infinite option. Grip assist and handbrake strength are experimental and off by default. Tuning is kept per vehicle (or one tuning for every vehicle). A speedometer shows km/h or mph, the nitro tank and the active tuning.
+  - **Performance (experimental):** engine power, brake and handbrake multipliers (1.0x–10.0x in 0.5 steps), a top speed limit, and nitro (off by default) with a tank, three power levels and an infinite option. There are three switchable **boost methods** and an experimental grip assist. One tuning applies to every vehicle by default (per-vehicle is optional). A speedometer shows km/h or mph, the nitro tank and the active tuning.
   - **Presets:** save the car you're in (model, paint, extras, livery, dirt, tuning) to `ClaudeMenu.ini`, then spawn it again, apply it to another car, overwrite or delete it.
   - **Quick actions:** repair, wash, flip upright, vehicle god mode, auto repair, delete.
 - **Weapons:** give all (for the episode you're playing), give one weapon, infinite ammo, no reload, fast reload, refill, explosive hits, remove all
 - **World:** hour and minute, freeze time, weather, traffic / pedestrian / parked car density, clear area (everything, vehicles, peds or police), game speed (slow motion), gravity on/off, unlock all islands
 - **Teleport:** map waypoint (finds the ground), forward and up nudges, 29 Liberty City landmarks across Algonquin, Broker & Dukes, Bohan and Alderney, 6 save/load slots and your own named locations from the INI
-- **Misc:** hide HUD and radar, hide radar only, coordinates, FPS counter, free camera (fly with the sticks, A teleports you there), speedometer and units
-- **Settings:** rebind open/close/nitro, freeze-while-open, stick navigation, keyboard fallback, menu position (left/center/right), 6 colour themes, menu size, rows shown, save when the menu closes, controller status
+- **Misc:** hide HUD and radar, hide radar only, coordinates, FPS counter, **Live Debug**, free camera (fly with the sticks, A teleports you there), speedometer and units
+- **Settings:** rebind open/close/nitro, set the sprint and jump buttons, freeze-while-open, camera moves while open, stick navigation, keyboard fallback, menu position (left/center/right), 6 colour themes, menu size, rows shown, **menu opacity**, save when the menu closes, controller status
 
-The menu has section headers, ON/OFF switches, values shown as `< 2.5x >`, a tooltip line for the selected item, a scrollbar, and a highlight that glides between rows.
+The menu is translucent: its panels let the game show through, with text shadows so it stays readable (**Settings → Menu Opacity**, 85% by default). It has section headers, ON/OFF switches, values shown as `< 2.5x >`, a tooltip line for the selected item, a scrollbar, and a highlight that glides between rows.
 
-### How the performance multipliers work (untested on the Deck)
+### How the performance multipliers work (experimental, untested on the Deck)
 
-GTA IV has no native for engine power, torque or brake force (nothing like GTA V's power multiplier). Editing handling data in memory depends on the exact game version and isn't safe from a loose script. Deck testing also showed that **writing the car's speed or forces every frame doesn't work**. Per-frame `APPLY_FORCE_TO_CAR` had no visible effect, and `SET_CAR_FORWARD_SPEED` every frame stopped the car moving at all.
+GTA IV has no native for engine power, torque or brake force (nothing like GTA V's power multiplier), and editing handling data in memory isn't safe from a loose script. So ClaudeMenu does what working GTA IV trainers do:
 
-So the multipliers use **speed kicks**. ClaudeMenu adds up the speed change it wants over 200 ms and applies it as one `SET_CAR_FORWARD_SPEED` call, at most five times a second:
+- The **XMC mod menu**'s "NFS mode" calls `SET_CAR_FORWARD_SPEED(car, speed × 1.02)` every frame while RT is held. It reads the speed from the game just before, so it never sets the car slower than it's going.
+- Forward speed comes from `GET_CAR_SPEED_VECTOR(car, …, true)`, the car's own frame (Y forward, X sideways). Rockstar's own scripts use flag 0 for world space, and LotsofEds' downforce mod reads Y of the flag-1 vector.
 
-- **Engine power:** while you hold RT, the speed change is `(multiplier − 1) × 3.5 m/s²` times how far the trigger is pressed, tapering at very high speed. Kicks only start once the car is already rolling under its own power (3 m/s, about 11 km/h), so from a standstill the car pulls away normally first.
-- **Brakes:** while you brake (LT) and are moving forward, `(multiplier − 1) × 6 m/s²`. It never sets your speed below 0.5 m/s, so it can't push you into reverse.
-- **Nitro:** off by default (Performance → Nitro). While you hold L3, a fixed push on top. The tank drains in about 3.5 s and refills after a short pause.
-- **Top speed limit:** power and nitro kicks are clamped to the limit; above it, one kick brings you back down.
+Each frame ClaudeMenu works out the forward speed it wants:
 
-There are **no kicks** while the menu is open, while you're in the air, with the handbrake held, while reversing or nearly stopped, or when you aren't the driver. With every setting at stock (the default), the performance code never touches the car.
+- **Engine power:** `+ (0.0022 × speed + 0.03) × (multiplier − 1) × throttle` m/s per 30 fps frame. It eases in as you press RT and stops the moment you let go. Only while moving forward (1 m/s or faster), on the ground, with the handbrake released.
+- **Nitro:** off by default (Performance → Nitro). `+0.25 / 0.4 / 0.7` m/s per 30 fps frame while you hold L3. The tank drains in about 3.5 s and refills after a short pause.
+- **Brakes / handbrake:** `−0.15 / −0.12 × (multiplier − 1)` while braking (LT) or holding the handbrake (RB). Never below 0.3 m/s, so they can't push you into reverse.
+- **Top speed limit:** the result is clamped to the limit.
 
-**Grip assist** and **handbrake strength** still use per-frame `APPLY_FORCE_TO_CAR`, the approach that showed no effect on the Deck. They only run if you switch on **Performance → Force Assists (experimental)**, which is off by default.
+Then it applies the change with the **Boost Method** (Performance → How It's Applied). If one does nothing on your setup, try another:
 
-Limits: a kick changes the car's speed along its nose, so gear ratios, engine sound and wheelspin don't change the way a real handling edit would, and five kicks a second may feel stepped rather than smooth. It works on cars and bikes (not helicopters or boats). It reads the throttle from the controller triggers, or W/S/Space on a keyboard without a controller, so a custom binding that moves accelerate elsewhere won't drive it. `ForceScale` under `[Performance]` in `ClaudeMenu.ini` (1.0 by default) scales the kicks.
+| Method | What it does | Based on |
+|---|---|---|
+| **Smooth** (default) | `SET_CAR_FORWARD_SPEED` every frame | the XMC trainer's NFS mode |
+| **Pulses** | the change summed over 200 ms, then one `SET_CAR_FORWARD_SPEED` | ClaudeMenu 1.1.6 |
+| **Force** | `APPLY_FORCE_TO_CAR(type 3, local, scaled by mass)` every frame | ScriptHookDotNet's `ApplyForceRelative`, LotsofEds' downforce mod |
 
-To check what it's doing, open `scripts/ClaudeMenu.log`. The first six kicks after you open the Performance menu are logged as `Power kick: 14.2 -> 15.0 m/s (power)`, and reopening the menu logs six more.
+Nothing is applied while the menu is open, in the air, while reversing or nearly stopped, or when you aren't the driver. With every setting at stock (the default) the performance code never touches the car. **Grip Assist** pushes against the sideways slide with `APPLY_FORCE_TO_CAR` and stays experimental, off by default.
+
+**Why the earlier versions did nothing or pinned the car:** they scaled the boost by `GET_FRAME_TIME`. If that reads about 0 under Proton, a per-frame force does nothing and a per-frame speed write holds the car at its current speed, which matches both Deck results. 1.2.0 times frames with a high-resolution wall clock instead. **Live Debug** shows both values ("frame 17 ms (game says …)"), so the next Deck test will settle it.
+
+Limits: it changes the car's speed along its nose, so gear ratios, engine sound and wheelspin don't change the way a real handling edit would. It works on cars and bikes (not helicopters or boats). It reads the throttle from the controller triggers, or W/S/Space on a keyboard without a controller. `ForceScale` under `[Performance]` in `ClaudeMenu.ini` (1.0 by default) scales every change. The first eight boosts after you open the Performance menu are logged as `Boost smooth: 20.00 -> 20.07 (power) m/s`.
+
+### How Super Run and Super Jump work (experimental, untested on the Deck)
+
+Deck tests showed `SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER` and on-ground `SET_CHAR_VELOCITY` freeze walking, and a single in-air velocity write is ignored. So neither is used. Instead, like the **XMC mod menu**, ClaudeMenu adds a small push with `APPLY_FORCE_TO_PED(player, type 1, …, component 1, local, local, scaled by mass)` every frame **while you hold the button**. It adds to the game's own movement instead of overwriting it.
+
+- **Super Run:** a forward push while you hold sprint (A) and move the left stick, on the ground. **Run Boost** 1–10 (5 is XMC's value).
+- **Super Jump:** an upward push for up to 0.6 s after you press jump (X), while you keep holding it. **Jump Boost** 1–10 (5 is XMC's value). You're invincible from take-off until a moment after you land, so the fall doesn't hurt.
+
+Both are off by default and do nothing unless you hold the button. Neither does anything while the menu is open or while you're holding LB+RB (the menu combo). Each sprint and jump is logged, like `Super run: top speed 11.2 m/s (normal sprint is about 7)` and `Super jump: rose 4.5 m (a normal jump is about 1)`. That shows whether the push works on your setup.
 
 ### What GTA IV can't do (so ClaudeMenu doesn't pretend to)
 
@@ -65,7 +86,7 @@ To check what it's doing, open `scripts/ClaudeMenu.log`. The first six kicks aft
 - **IV can't tell which extras a model has.** Extras 1–9 are always listed; the ones a model doesn't have do nothing.
 - **Gravity is on or off**: there's no low-gravity setting.
 - **Explosive hits** only work on people and vehicles you damage (IV has no bullet-impact native, so walls and the ground don't explode).
-- **No fast run or super jump.** Tested on a Steam Deck: SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER freezes the walk cycle (even when set to 1.0), scaling SET_CHAR_VELOCITY on the ground freezes it too, and velocity changes in the air are ignored (jumps landed at the same height). IV gives scripts no working way to do either. Use Unlimited Sprint.
+- **No animation-speed fast run.** `SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER` freezes the walk cycle on the Deck (even at 1.0), and writing the player's velocity on the ground freezes it too. Super Run and Super Jump push instead (see above).
 - **Liveries** only exist on some models (taxis, police and a few others).
 - **Player models and vehicles** that aren't in the episode you're playing are reported as unavailable instead of loading.
 
@@ -235,8 +256,11 @@ These are the problems we hit on a real Deck, in the order we hit them.
 
 - **The combo does nothing.** Look in `scripts/ClaudeMenu.log`. If there's no log, ScriptHookDotNet didn't load the script (check ScriptHookDotNet's own log, .NET in the prefix, and the launch options). If the log exists, open the menu with F4 and check **Settings → Controller Status**.
 - **Some option does nothing.** If one game function fails, ClaudeMenu logs it, turns off only that function, and keeps running. Send the log lines.
-- **The performance multipliers do nothing.** Check `scripts/ClaudeMenu.log` for `Power kick:` lines. No lines means no kick fired: you need to be the driver, holding RT, already moving faster than about 11 km/h, on the ground, with the menu closed and the handbrake released. If the lines are there but you can't feel it, raise `ForceScale` under `[Performance]` in `ClaudeMenu.ini` (edit it with the game closed). If it's too strong, lower it.
-- **Nitro does nothing.** It's off by default: turn on Performance → Nitro. It also needs you driving a car or bike faster than about 11 km/h with the nitro button (L3 by default) held. Rebind it under **Settings → Rebind Nitro Button**.
+- **The performance multipliers do nothing.** Turn on **Live Debug** (Performance or Misc) and drive. The CAR line shows what ClaudeMenu sees: whether you're the driver, RT/LT, forward speed, frame time, and what it applied. If it says `driver N` or `tunable N`, it won't touch that vehicle. If RT stays at 0.00 while you press it, it isn't seeing the trigger. If it shows boosts (`smooth: 20.00 -> 20.07 (power)`) but the car doesn't feel faster, switch **Boost Method** to Pulses or Force, or raise `ForceScale` in `ClaudeMenu.ini`. The log also records the first boosts as `Boost smooth: …` lines.
+- **The car stops or won't pull away with a multiplier on.** Set **Boost Method** to Pulses or Force and tell us what Live Debug showed. Reset to Stock always gives you the normal car back.
+- **Nitro does nothing.** It's off by default: turn on Performance → Nitro. It also needs you driving a car or bike that's moving forward, with the nitro button (L3 by default) held. Rebind it under **Settings → Rebind Nitro Button**.
+- **Super Run / Super Jump do nothing.** Turn on **Live Debug** and check the FOOT line. `run btn` and `jump btn` should say Y while you hold sprint (A) and jump (X). If they don't, set your buttons under **Settings → Set Sprint Button / Set Jump Button**. If they do and it shows `run push` / `jump push` but nothing happens, raise **Run Boost / Jump Boost**. The log records each attempt (`Super run: top speed …`, `Super jump: rose … m`).
+- **Walking feels wrong.** Turn Super Run off. With it off ClaudeMenu doesn't touch your movement at all, and if walking is still odd, send the log.
 - **Free camera says it isn't working.** The camera couldn't be created in your setup; the log has the details. Everything else keeps working.
 - **The text sits a bit off in its rows.** Change **Settings → Menu Size**.
 - **The menu stays frozen after closing, or you can't move.** Open and close the menu again, or turn off "Freeze Player While Open".
@@ -245,9 +269,9 @@ These are the problems we hit on a real Deck, in the order we hit them.
 
 The menu writes this file itself (Settings → Save Settings Now, or automatically with "Save When Menu Closes"). You can also edit it with the game closed:
 
-- `[Controls]`: `OpenCombo`, `CloseCombo`, `NitroButton`, `JumpButton` (buttons joined with `+`), freeze-while-open, stick navigation, keyboard fallback
-- `[Display]`: menu position, theme, size, rows shown, `SaveOnClose`, `Speedometer`, `SpeedUnits` (`kmh` or `mph`)
-- `[Performance]`: `ForceScale`
+- `[Controls]`: `OpenCombo`, `CloseCombo`, `NitroButton`, `JumpButton`, `RunButton` (buttons joined with `+`), freeze-while-open, `CameraWhileOpen`, stick navigation, keyboard fallback
+- `[Display]`: menu position, theme, size, rows shown, `Opacity` (40–100), `SaveOnClose`, `Speedometer`, `SpeedUnits` (`kmh` or `mph`)
+- `[Performance]`: `BoostMethod` (`smooth`, `pulses` or `force`), `ForceScale`
 - `[Teleport]`: saved slots and your own `Location=Name|X|Y|Z` lines
 - `[Vehicles]`: one `Preset=` line per saved vehicle; the first field is its name, so you can rename presets here
 
@@ -269,3 +293,15 @@ These rules come from getting the script running on a real Deck. Please keep the
 - **Draw only in `PerFrameDrawing`, with `GTA.Graphics`.** Drawing natives called from `Tick` run but never show up. `Tick` runs the game logic and builds a `FrameView` snapshot; the drawing code only renders that snapshot.
 - **Call natives only through `N.Call` / `N.Get`** (and the `N.OutInt` / `N.OutFloat` helpers). A failing native is logged once and switched off instead of crashing the script. Use GTA IV natives only, checked against the IV native list and the ScriptHookDotNet source.
 - **Keep `tools/shdn-stub` honest.** When you use a new ScriptHookDotNet member, add it to the stub with the same name and signature as in ScriptHookDotNet 1.7.x, so the compile check stays meaningful.
+
+## Credits and references
+
+ClaudeMenu borrows *techniques*, not code, from GTA IV mods whose source is public. Thanks to their authors:
+
+- **XMC mod menu** (EmmanuelU/xmc-mod-menu): super run and super jump with `APPLY_FORCE_TO_PED` while a button is held, the per-frame `SET_CAR_FORWARD_SPEED(speed × 1.02)` "NFS mode", and `SET_CAMERA_CONTROLS_DISABLED_WITH_PLAYER_CONTROLS` to keep the camera while the player is frozen.
+- **ChaosIV** (bountifulellie/ChaosIV) and **TORISOUP's GTA4 Inferno scripts**: how much force it takes to move peds and cars in IV, re-applying a ped's velocity over several ticks, and using collision proofing for falls.
+- **LotsofEds' IV mods** (MoveImproveIV-SDK, IVMouseWheelThrottle): per-frame forces on the player's car, and reading forward speed from `GET_CAR_SPEED_VECTOR(…, true)`.
+- **Rockstar's decompiled mission scripts** (0x52617665/GTAIVMissionScripts): how the game itself calls `APPLY_FORCE_TO_CAR` and `GET_CAR_SPEED_VECTOR`.
+- **HappinessMP's native docs** (HappinessMP/natives): the real argument names of `APPLY_FORCE_TO_CAR` / `APPLY_FORCE_TO_PED` (force, offset, component, local force, local offset, scale by mass).
+- **ScriptHookDotNet** (Tomasak/gta4_scripthookdotnet) and **FusionFix**'s native table: the API and native signatures every call here is checked against.
+

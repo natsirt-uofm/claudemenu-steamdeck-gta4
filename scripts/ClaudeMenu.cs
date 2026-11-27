@@ -530,8 +530,10 @@ namespace ClaudeMenu
         public uint OpenCombo = Btn.LB | Btn.RB | Btn.X;
         public uint CloseCombo = Btn.LB | Btn.RB | Btn.B;
         public uint NitroCombo = Btn.LS;
-        public uint JumpButton = Btn.X;          // GTA IV's jump on an Xbox pad
+        public uint JumpButton = Btn.X;          // GTA IV's jump on an Xbox pad (Super Jump listens for it)
+        public uint RunButton = Btn.A;           // GTA IV's sprint on an Xbox pad (Super Run listens for it)
         public bool FreezePlayer = true;
+        public bool CameraWhileOpen = true;      // right stick still turns the camera while the menu is open
         public bool StickNavigation = true;
         public bool KeyboardFallback = true;
         public int KeyToggle = 0x73;
@@ -544,9 +546,11 @@ namespace ClaudeMenu
         public bool SaveOnClose = false;
         public bool Speedometer = true;
         public int SpeedUnits = 0;     // 0 = km/h, 1 = mph
+        public int Opacity = 85;       // menu panel opacity in percent (40..100)
 
         // [Performance]
-        public float ForceScale = 1.0f;   // advanced: scales every force the tuning code applies
+        public float ForceScale = 1.0f;   // advanced: scales every speed change the tuning code makes
+        public int BoostMethod = 0;       // 0 smooth (every frame), 1 pulses (5 per second), 2 force
 
         // [Teleport] / [Vehicles]
         public string[] Slots = new string[6];
@@ -575,6 +579,13 @@ namespace ClaudeMenu
                         case "closecombo": CloseCombo = Btn.Parse(val, CloseCombo); break;
                         case "nitrobutton": NitroCombo = Btn.Parse(val, NitroCombo); break;
                         case "jumpbutton": JumpButton = Btn.Parse(val, JumpButton); break;
+                        case "runbutton": RunButton = Btn.Parse(val, RunButton); break;
+                        case "camerawhileopen": CameraWhileOpen = U.ParseBool(val, CameraWhileOpen); break;
+                        case "opacity": Opacity = U.Clamp(U.ParseInt(val, Opacity), 40, 100); break;
+                        case "boostmethod":
+                            string bm = val.ToLowerInvariant();
+                            BoostMethod = bm.StartsWith("puls") || bm == "1" ? 1 : (bm.StartsWith("force") || bm == "2" ? 2 : 0);
+                            break;
                         case "freezeplayerwhileopen": FreezePlayer = U.ParseBool(val, FreezePlayer); break;
                         case "sticknavigation": StickNavigation = U.ParseBool(val, StickNavigation); break;
                         case "keyboardfallback": KeyboardFallback = U.ParseBool(val, KeyboardFallback); break;
@@ -618,9 +629,12 @@ namespace ClaudeMenu
                 sb.AppendLine("CloseCombo=" + Btn.ToText(CloseCombo));
                 sb.AppendLine("; Hold while driving for nitro (the Deck's back grips can be mapped to L3 in Steam Input)");
                 sb.AppendLine("NitroButton=" + Btn.ToText(NitroCombo));
-                sb.AppendLine("; Unused since Super Jump was removed (kept so old INI files still load)");
+                sb.AppendLine("; The game's jump and sprint buttons, used by Super Jump / Super Run (X and A on an Xbox-style pad)");
                 sb.AppendLine("JumpButton=" + Btn.ToText(JumpButton));
+                sb.AppendLine("RunButton=" + Btn.ToText(RunButton));
                 sb.AppendLine("FreezePlayerWhileOpen=" + U.B(FreezePlayer));
+                sb.AppendLine("; Keep the right stick on the camera while the menu is open");
+                sb.AppendLine("CameraWhileOpen=" + U.B(CameraWhileOpen));
                 sb.AppendLine("StickNavigation=" + U.B(StickNavigation));
                 sb.AppendLine("; Keyboard: arrows/Enter/Backspace navigate, toggle key is a Windows virtual-key code (115 = F4)");
                 sb.AppendLine("KeyboardFallback=" + U.B(KeyboardFallback));
@@ -635,10 +649,14 @@ namespace ClaudeMenu
                 sb.AppendLine("SaveOnClose=" + U.B(SaveOnClose));
                 sb.AppendLine("Speedometer=" + U.B(Speedometer));
                 sb.AppendLine("SpeedUnits=" + (SpeedUnits == 1 ? "mph" : "kmh"));
+                sb.AppendLine("; Menu panel opacity in percent (40 = very see-through, 100 = solid)");
+                sb.AppendLine("Opacity=" + U.I(Opacity));
                 sb.AppendLine();
                 sb.AppendLine("[Performance]");
-                sb.AppendLine("; Advanced: scales the speed kicks (power, brakes, nitro) and experimental assists (0.1 - 5.0).");
-                sb.AppendLine("; Leave at 1.0 unless the multipliers feel far too weak or too strong in your setup.");
+                sb.AppendLine("; How the multipliers are applied: smooth (every frame, like the XMC trainer), pulses (5 per second) or force");
+                sb.AppendLine("BoostMethod=" + (BoostMethod == 1 ? "pulses" : (BoostMethod == 2 ? "force" : "smooth")));
+                sb.AppendLine("; Advanced: scales every speed change the multipliers make (0.1 - 5.0). Leave at 1.0 unless");
+                sb.AppendLine("; they feel far too weak or too strong in your setup.");
                 sb.AppendLine("ForceScale=" + U.F(ForceScale, "0.00"));
                 sb.AppendLine();
                 sb.AppendLine("[Teleport]");
@@ -1240,7 +1258,8 @@ namespace ClaudeMenu
         public bool NitroShown, NitroActive;
         public float NitroLevel;           // 0..1
 
-        public string Coords, Fps, Overlay;
+        public string Coords, Fps, Overlay, DebugCar, DebugFoot;
+        public float Opacity = 0.85f;
         public string Toast;
         public int ToastUntil;
     }
@@ -1251,7 +1270,7 @@ namespace ClaudeMenu
 
     public partial class MenuScript : Script
     {
-        private const string Version = "1.1.6";
+        private const string Version = "1.2.0";
 
         private readonly Config cfg = new Config();
         private readonly InputState input = new InputState();
@@ -1269,7 +1288,7 @@ namespace ClaudeMenu
         private bool paused;
 
         // Rebind capture
-        private int captureTarget;     // 0 none, 1 open, 2 close, 3 nitro, 4 jump
+        private int captureTarget;     // 0 none, 1 open, 2 close, 3 nitro, 4 jump, 5 run
         private bool captureArmed;
         private uint captureUnion;
         private int captureDeadline;
@@ -1360,7 +1379,7 @@ namespace ClaudeMenu
             stack.Clear();
             stack.Push(root);
             Enter(root);
-            if (cfg.FreezePlayer) weFroze = N.Call("SET_PLAYER_CONTROL", pi, false);
+            if (cfg.FreezePlayer) FreezePlayer(true);
             N.Call("PLAY_AUDIO_EVENT", "FRONTEND_MENU_HIGHLIGHT_DOWN_UP");
         }
 
@@ -1373,12 +1392,30 @@ namespace ClaudeMenu
                 Menu m = stack.Pop();
                 if (m.OnExit != null) m.OnExit(m);
             }
-            if (weFroze)
-            {
-                N.Call("SET_PLAYER_CONTROL", pi, true);
-                weFroze = false;
-            }
+            FreezePlayer(false);
             if (cfg.SaveOnClose) cfg.Save();
+        }
+
+        private bool camFreed;   // we told the game to keep camera controls while player controls are off
+
+        /// <summary>
+        /// Freeze or unfreeze the player for the menu. With CameraWhileOpen the right
+        /// stick keeps turning the camera: SET_CAMERA_CONTROLS_DISABLED_WITH_PLAYER_CONTROLS(false)
+        /// before SET_PLAYER_CONTROL(false), as the XMC trainer does.
+        /// </summary>
+        private void FreezePlayer(bool freeze)
+        {
+            if (freeze && !weFroze)
+            {
+                if (cfg.CameraWhileOpen) camFreed = N.Call("SET_CAMERA_CONTROLS_DISABLED_WITH_PLAYER_CONTROLS", false);
+                weFroze = N.Call("SET_PLAYER_CONTROL", pi, false);
+            }
+            else if (!freeze)
+            {
+                if (weFroze) { N.Call("SET_PLAYER_CONTROL", pi, true); weFroze = false; }
+                // Put the game's default back, so missions that take control also lock the camera.
+                if (camFreed) { N.Call("SET_CAMERA_CONTROLS_DISABLED_WITH_PLAYER_CONTROLS", true); camFreed = false; }
+            }
         }
 
         internal void Push(Menu m)
@@ -1465,7 +1502,7 @@ namespace ClaudeMenu
         private void Beep() { N.Call("PLAY_AUDIO_EVENT", "FRONTEND_MENU_HIGHLIGHT_DOWN_UP"); }
 
         // --------------------------------------------------------- rebinding
-        private static readonly string[] CaptureNames = { "", "OPEN", "CLOSE", "NITRO", "JUMP" };
+        private static readonly string[] CaptureNames = { "", "OPEN", "CLOSE", "NITRO", "JUMP", "RUN" };
 
         private void StartCapture(int target)
         {
@@ -1499,7 +1536,8 @@ namespace ClaudeMenu
             if (target == 1) cfg.OpenCombo = combo;
             else if (target == 2) cfg.CloseCombo = combo;
             else if (target == 3) cfg.NitroCombo = combo;
-            else cfg.JumpButton = combo;
+            else if (target == 4) cfg.JumpButton = combo;
+            else cfg.RunButton = combo;
             cfg.Save();
             Notify(CaptureNames[target].Substring(0, 1) + CaptureNames[target].Substring(1).ToLowerInvariant() + " set to " + Btn.ToText(combo));
         }
@@ -1617,6 +1655,7 @@ namespace ClaudeMenu
             f.Theme = Themes.All[U.Clamp(cfg.Theme, 0, Themes.Count - 1)];
             f.Scale = cfg.Scale;
             f.Position = cfg.Position;
+            f.Opacity = cfg.Opacity / 100f;
             f.MenuOpen = open && !paused && !freecamOn && stack.Count > 0;
 
             if (f.MenuOpen)
@@ -1673,7 +1712,7 @@ namespace ClaudeMenu
                 }
                 else if (m.Current != null) f.Help = m.Current.Help;
 
-                f.Hints = "A Select   B Back   < > Change   LT/RT Page   Close " + Btn.ToText(cfg.CloseCombo);
+                f.Hints = "A select    B back    < > change    LT/RT page    " + Btn.ToText(cfg.CloseCombo) + " close";
             }
 
             FillHud(f);
@@ -1700,13 +1739,15 @@ namespace ClaudeMenu
                 int t = Environment.TickCount;
                 float ddt = U.Clamp((t - lastDrawTick) / 1000f, 0f, 0.1f);
                 lastDrawTick = t;
+                op = f.Opacity;
 
                 if (f.MenuOpen) DrawMenu(f, ddt);
                 else animSel = -1f;
                 if (f.Speedo) DrawSpeedo(f);
-                if (f.Coords != null) Box(f.Coords, 0.5f, 0.955f, 0.26f, Col.FromArgb(160, 0, 0, 0), Col.White);
-                if (f.Fps != null) TextRight(f.Fps, 0.985f, 0.005f, 0.26f, Col.FromArgb(230, 255, 255, 120));
-                if (f.Overlay != null) Box(f.Overlay, 0.5f, 0.90f, 0.28f, Col.FromArgb(200, 0, 0, 0), Col.White);
+                if (f.Coords != null) Box(f.Coords, 0.5f, 0.955f, 0.26f, Col.FromArgb(150, 0, 0, 0), Col.White);
+                if (f.Fps != null) TextRightS(f.Fps, 0.985f, 0.005f, 0.26f, Col.FromArgb(240, 255, 255, 140));
+                if (f.Overlay != null) Box(f.Overlay, 0.5f, 0.90f, 0.28f, Col.FromArgb(170, 0, 0, 0), Col.White);
+                if (f.DebugCar != null || f.DebugFoot != null) DrawDebug(f);
                 if (f.Toast != null && t < f.ToastUntil) DrawToast(f);
             }
             catch (Exception ex)
@@ -1720,42 +1761,52 @@ namespace ClaudeMenu
             }
         }
 
+        // ---- look ------------------------------------------------------------
+        // Panels are translucent: their alpha is multiplied by the Menu Opacity
+        // setting (op). Text and the selection bar stay solid, with a soft
+        // shadow so they read on top of the game.
+        private static float op = 0.85f;
+        private static Col Glass(int a, int r, int g, int b) { return Col.FromArgb((int)(a * op), r, g, b); }
+        private static Col Glass(Col c, int a) { return Col.FromArgb((int)(a * op), c.R, c.G, c.B); }
+
         private void DrawMenu(FrameView f, float ddt)
         {
             float s = f.Scale;
             Theme th = f.Theme;
-            float w = 0.28f * s;
-            float headerH = 0.058f * s;
-            float subH = 0.034f * s;
+            float w = 0.27f * s;
+            float headerH = 0.050f * s;
+            float subH = 0.030f * s;
             float rowH = 0.034f * s;
-            float pad = 0.009f * s;
+            float pad = 0.010f * s;
             float x = f.Position == 0 ? 0.03f : (f.Position == 1 ? 0.5f - w / 2f : 0.97f - w);
             float y = 0.08f;
+            Col accent = th.Accent.WithAlpha(255);
 
-            // Header with an accent strip underneath.
-            Rect(x, y, w, headerH, th.Header);
-            TextV("CLAUDE MENU", x + pad, y, headerH, 0.50f * s, Col.White);
-            TextRight("v" + Version, x + w - pad, y + headerH * 0.55f, 0.22f * s, Col.FromArgb(190, 255, 255, 255));
+            // Title bar: theme colour, see-through, with a thin solid accent line under it.
+            Rect(x, y, w, headerH, Glass(th.Header, 230));
+            TextVS("CLAUDE MENU", x + pad, y, headerH, 0.42f * s, Col.White);
+            TextRightVS("v" + Version, x + w - pad, y, headerH, 0.20f * s, Col.FromArgb(200, 255, 255, 255));
             y += headerH;
-            Rect(x, y, w, 0.004f * s, th.Accent);
-            y += 0.004f * s;
+            Rect(x, y, w, 0.003f * s, accent);
+            y += 0.003f * s;
 
-            // Section bar: breadcrumb + position.
-            Rect(x, y, w, subH, Col.FromArgb(240, 12, 12, 14));
-            TextV(f.Crumb, x + pad, y, subH, 0.27f * s, th.Accent.WithAlpha(255));
-            TextRightV(f.Counter, x + w - pad, y, subH, 0.27f * s, Col.FromArgb(220, 230, 230, 230));
+            // Section bar: where you are + position in the list.
+            Rect(x, y, w, subH, Glass(195, 8, 8, 10));
+            TextVS(f.Crumb, x + pad, y, subH, 0.24f * s, accent);
+            TextRightVS(f.Counter, x + w - pad, y, subH, 0.24f * s, Col.FromArgb(210, 225, 225, 225));
             y += subH;
 
-            // Rows. The highlight glides to the selected row.
+            // Rows on one see-through panel; the highlight glides to the selected row.
             int n = f.Rows.Length;
-            Rect(x, y, w, rowH * n, Col.FromArgb(200, 0, 0, 0));
+            Rect(x, y, w, rowH * n, Glass(180, 0, 0, 0));
             if (f.SelRow >= 0 && f.SelRow < n)
             {
                 if (animSel < 0f || animCrumb != f.Crumb) animSel = f.SelRow;
                 animSel += (f.SelRow - animSel) * Math.Min(1f, ddt * 18f);
                 if (Math.Abs(animSel - f.SelRow) < 0.01f) animSel = f.SelRow;
-                Rect(x, y + animSel * rowH, w, rowH, th.Accent);
-                Rect(x, y + animSel * rowH, 0.004f * s, rowH, Col.White);
+                float hy = y + animSel * rowH;
+                Rect(x, hy, w, rowH, Col.FromArgb((int)(150 + 70 * op), th.Accent.R, th.Accent.G, th.Accent.B));
+                Rect(x, hy, 0.0035f * s, rowH, Col.White);
             }
             animCrumb = f.Crumb;
 
@@ -1764,104 +1815,118 @@ namespace ClaudeMenu
                 RowView r = f.Rows[i];
                 float ry = y + i * rowH;
                 bool sel = i == f.SelRow;
-                Col tc = sel ? Col.White : Col.FromArgb(255, 222, 222, 222);
+                Col tc = sel ? Col.White : Col.FromArgb(255, 232, 232, 232);
 
                 if (r.Kind == RowKind.Header)
                 {
-                    Rect(x, ry, w, rowH, Col.FromArgb(150, 0, 0, 0));
-                    TextV(r.Label.ToUpperInvariant(), x + pad, ry, rowH, 0.24f * s, th.Accent.WithAlpha(255));
-                    Rect(x + pad, ry + rowH - 0.0025f * s, w - 2f * pad, 0.0015f * s, th.Accent.WithAlpha(120));
+                    // Section header: no box, just accent text over a hairline.
+                    TextVS(r.Label.ToUpperInvariant(), x + pad, ry + rowH * 0.12f, rowH, 0.22f * s, accent);
+                    Rect(x + pad, ry + rowH - 0.004f * s, w - 2f * pad, 0.0012f * s, Glass(accent, 170));
                     continue;
                 }
 
-                Col lc = r.Kind == RowKind.Info ? Col.FromArgb(255, 170, 170, 170) : tc;
-                TextV(r.Label, x + pad + (sel ? 0.004f * s : 0f), ry, rowH, 0.30f * s, lc);
+                Col lc = r.Kind == RowKind.Info ? Col.FromArgb(255, 175, 175, 175) : tc;
+                TextVS(r.Label, x + pad + (sel ? 0.004f * s : 0f), ry, rowH, 0.29f * s, lc);
                 float right = x + w - pad - 0.004f * s;
 
                 if (r.Kind == RowKind.Toggle)
                 {
-                    float pw = 0.038f * s, ph = rowH * 0.6f;
+                    // Pill switch: green and "ON", or dim and "OFF".
+                    float pw = 0.036f * s, ph = rowH * 0.56f;
                     float px = right - pw, py = ry + (rowH - ph) / 2f;
-                    Rect(px, py, pw, ph, r.On ? Col.FromArgb(240, 46, 170, 84) : Col.FromArgb(220, 70, 70, 74));
-                    TextCenterV(r.On ? "ON" : "OFF", px + pw / 2f, py, ph, 0.22f * s, Col.White);
+                    Rect(px, py, pw, ph, r.On ? Col.FromArgb(235, 40, 170, 90) : Col.FromArgb((int)(120 + 80 * op), 60, 60, 66));
+                    TextCenterV(r.On ? "ON" : "OFF", px + pw / 2f, py, ph, 0.20f * s, r.On ? Col.White : Col.FromArgb(230, 200, 200, 200));
                 }
                 else if (r.HasSwatch)
                 {
-                    float sw = 0.032f * s, sh = rowH * 0.62f;
+                    float sw = 0.030f * s, sh = rowH * 0.6f;
                     float sx = right - sw, sy = ry + (rowH - sh) / 2f;
-                    Rect(sx - 0.002f, sy - 0.003f, sw + 0.004f, sh + 0.006f, Col.FromArgb(255, 235, 235, 235));
+                    Rect(sx - 0.0015f, sy - 0.0025f, sw + 0.003f, sh + 0.005f, Col.FromArgb(230, 240, 240, 240));
                     Rect(sx, sy, sw, sh, r.Swatch);
-                    if (r.Value != null) TextRightV(r.Value, sx - 0.008f * s, ry, rowH, 0.24f * s, Col.FromArgb(200, 210, 210, 210));
+                    if (r.Value != null) TextRightVS(r.Value, sx - 0.008f * s, ry, rowH, 0.22f * s, Col.FromArgb(210, 215, 215, 215));
                 }
                 else if (r.Kind == RowKind.Submenu)
                 {
-                    TextRightV(r.Value ?? ">", right, ry, rowH, 0.30f * s, tc);
+                    TextRightVS(r.Value ?? ">", right, ry, rowH, 0.27f * s, sel ? Col.White : Col.FromArgb(220, 200, 200, 200));
                 }
                 else if (r.Value != null)
                 {
-                    TextRightV(r.Value, right, ry, rowH, 0.30f * s, tc);
+                    TextRightVS(r.Value, right, ry, rowH, 0.29f * s, tc);
                 }
             }
 
-            // Scrollbar along the right edge of the rows.
+            // Thin scrollbar along the right edge.
             if (f.Count > n && n > 0)
             {
                 float trackH = rowH * n;
                 float thumbH = Math.Max(rowH * 0.5f, trackH * n / f.Count);
                 float thumbY = y + (trackH - thumbH) * f.Scroll / Math.Max(1, f.Count - n);
-                Rect(x + w - 0.0035f * s, y, 0.0035f * s, trackH, Col.FromArgb(120, 255, 255, 255));
-                Rect(x + w - 0.0035f * s, thumbY, 0.0035f * s, thumbH, th.Accent.WithAlpha(255));
+                Rect(x + w - 0.003f * s, y, 0.003f * s, trackH, Glass(110, 255, 255, 255));
+                Rect(x + w - 0.003f * s, thumbY, 0.003f * s, thumbH, accent);
             }
             y += rowH * n;
 
             // Tooltip for the selected item (wraps to two lines).
             if (!string.IsNullOrEmpty(f.Help))
             {
-                float hh = rowH * 1.55f;
-                Rect(x, y, w, hh, Col.FromArgb(235, 22, 22, 26));
-                Rect(x, y, 0.003f * s, hh, Col.FromArgb(255, 255, 214, 110));
+                float hh = rowH * 1.5f;
+                Rect(x, y + 0.002f, w, hh, Glass(210, 14, 14, 18));
+                Rect(x, y + 0.002f, 0.0025f * s, hh, Col.FromArgb(255, 255, 214, 110));
                 if (gfx != null)
-                    gfx.DrawText(f.Help, new System.Drawing.RectangleF(x + pad, y + 0.004f * s, w - 2f * pad, hh - 0.004f * s),
-                        TextAlignment.Left | TextAlignment.WordBreak, ToColor(Col.FromArgb(255, 255, 230, 150)), FontFor(0.25f * s));
-                y += hh;
+                {
+                    System.Drawing.RectangleF area = new System.Drawing.RectangleF(x + pad, y + 0.002f + 0.004f * s, w - 2f * pad, hh - 0.004f * s);
+                    System.Drawing.RectangleF shadow = new System.Drawing.RectangleF(area.X + 0.0011f, area.Y + 0.0014f, area.Width, area.Height);
+                    gfx.DrawText(f.Help, shadow, TextAlignment.Left | TextAlignment.WordBreak, ToColor(Col.FromArgb(160, 0, 0, 0)), FontFor(0.24f * s));
+                    gfx.DrawText(f.Help, area, TextAlignment.Left | TextAlignment.WordBreak, ToColor(Col.FromArgb(255, 255, 232, 160)), FontFor(0.24f * s));
+                }
+                y += hh + 0.002f;
             }
 
-            Rect(x, y, w, subH * 0.9f, Col.FromArgb(240, 12, 12, 14));
-            TextV(f.Hints, x + pad, y, subH * 0.9f, 0.20f * s, Col.FromArgb(220, 195, 195, 195));
+            // Button hints.
+            Rect(x, y + 0.002f, w, subH * 0.85f, Glass(200, 8, 8, 10));
+            TextVS(f.Hints, x + pad, y + 0.002f, subH * 0.85f, 0.19f * s, Col.FromArgb(225, 200, 200, 200));
         }
 
         private void DrawSpeedo(FrameView f)
         {
             Theme th = f.Theme;
-            float w = 0.16f, h = f.NitroShown ? 0.118f : 0.100f;
+            float w = 0.15f, h = f.NitroShown ? 0.112f : 0.094f;
             float x = 0.985f - w, y = 0.86f - h;
-            Rect(x, y, w, h, Col.FromArgb(185, 0, 0, 0));
-            Rect(x, y, w, 0.003f, th.Accent);
-            if (f.TuneText != null) Text(f.TuneText, x + 0.008f, y + 0.008f, 0.19f, Col.FromArgb(230, 255, 214, 110), false);
-            TextRight(f.SpeedText, x + w - 0.040f, y + 0.020f, 0.80f, Col.White);
-            Text(f.SpeedUnit, x + w - 0.037f, y + 0.050f, 0.24f, Col.FromArgb(220, 210, 210, 210), false);
+            Rect(x, y, w, h, Glass(150, 0, 0, 0));
+            Rect(x, y, w, 0.0025f, th.Accent.WithAlpha(255));
+            if (f.TuneText != null) TextS(f.TuneText, x + 0.008f, y + 0.008f, 0.18f, Col.FromArgb(235, 255, 214, 110));
+            TextRightS(f.SpeedText, x + w - 0.040f, y + 0.018f, 0.78f, Col.White);
+            TextS(f.SpeedUnit, x + w - 0.037f, y + 0.047f, 0.23f, Col.FromArgb(225, 215, 215, 215));
 
-            float by = y + h - (f.NitroShown ? 0.032f : 0.016f);
-            Rect(x + 0.008f, by, w - 0.016f, 0.007f, Col.FromArgb(160, 80, 80, 80));
-            Rect(x + 0.008f, by, (w - 0.016f) * U.Clamp(f.SpeedFrac, 0f, 1f), 0.007f, th.Accent.WithAlpha(255));
+            float by = y + h - (f.NitroShown ? 0.030f : 0.015f);
+            Rect(x + 0.008f, by, w - 0.016f, 0.006f, Glass(150, 90, 90, 90));
+            Rect(x + 0.008f, by, (w - 0.016f) * U.Clamp(f.SpeedFrac, 0f, 1f), 0.006f, th.Accent.WithAlpha(255));
             if (f.NitroShown)
             {
-                float ny = by + 0.015f;
-                Text("N2O", x + 0.008f, ny - 0.006f, 0.17f, Col.FromArgb(230, 140, 210, 255), false);
-                float nx = x + 0.034f, nw = w - 0.042f;
-                Rect(nx, ny, nw, 0.007f, Col.FromArgb(160, 80, 80, 80));
-                Rect(nx, ny, nw * U.Clamp(f.NitroLevel, 0f, 1f), 0.007f, f.NitroActive ? Col.FromArgb(255, 255, 150, 40) : Col.FromArgb(255, 70, 170, 255));
+                float ny = by + 0.014f;
+                TextS("N2O", x + 0.008f, ny - 0.006f, 0.16f, Col.FromArgb(235, 140, 210, 255));
+                float nx = x + 0.033f, nw = w - 0.041f;
+                Rect(nx, ny, nw, 0.006f, Glass(150, 90, 90, 90));
+                Rect(nx, ny, nw * U.Clamp(f.NitroLevel, 0f, 1f), 0.006f, f.NitroActive ? Col.FromArgb(255, 255, 150, 40) : Col.FromArgb(255, 70, 170, 255));
             }
         }
 
         private void DrawToast(FrameView f)
         {
             float w = Math.Min(0.62f, 0.03f + f.Toast.Length * 0.0078f);
-            float h = 0.040f;
+            float h = 0.038f;
             float x = 0.5f - w / 2f, y = 0.035f;
-            Rect(x, y, w, h, Col.FromArgb(225, 14, 14, 16));
-            Rect(x, y, 0.004f, h, f.Theme.Accent.WithAlpha(255));
-            TextCenterV(f.Toast, 0.5f, y, h, 0.28f, Col.White);
+            Rect(x, y, w, h, Glass(185, 12, 12, 14));
+            Rect(x, y, 0.0035f, h, f.Theme.Accent.WithAlpha(255));
+            TextCenterVS(f.Toast, 0.5f, y, h, 0.27f, Col.White);
+        }
+
+        /// <summary>Live debug lines (Misc / Performance > Live Debug), above the coordinates.</summary>
+        private void DrawDebug(FrameView f)
+        {
+            float y = 0.835f;
+            if (f.DebugFoot != null) { Box(f.DebugFoot, 0.5f, y, 0.20f, Col.FromArgb(170, 0, 0, 0), Col.FromArgb(255, 160, 255, 160)); y += 0.032f; }
+            if (f.DebugCar != null) Box(f.DebugCar, 0.5f, y, 0.20f, Col.FromArgb(170, 0, 0, 0), Col.FromArgb(255, 160, 220, 255));
         }
 
         // Drawing helpers. They only work inside OnFrameDraw, where gfx is set.
@@ -1912,13 +1977,26 @@ namespace ClaudeMenu
         private static void TextRightV(string s, float right, float y, float h, float scale, Col c) { TextRight(s, right, TextTop(y, h, scale), scale, c); }
         private static void TextCenterV(string s, float cx, float y, float h, float scale, Col c) { Text(s, cx, TextTop(y, h, scale), scale, c, true); }
 
+        // The same with a soft drop shadow, for text on see-through panels.
+        private static Col ShadowOf(Col c) { return Col.FromArgb(c.A * 3 / 5, 0, 0, 0); }
+        private static void TextS(string s, float x, float y, float scale, Col c) { Text(s, x + 0.0011f, y + 0.0014f, scale, ShadowOf(c), false); Text(s, x, y, scale, c, false); }
+        private static void TextRightS(string s, float right, float y, float scale, Col c) { TextRight(s, right + 0.0011f, y + 0.0014f, scale, ShadowOf(c)); TextRight(s, right, y, scale, c); }
+        private static void TextVS(string s, float x, float y, float h, float scale, Col c) { TextS(s, x, TextTop(y, h, scale), scale, c); }
+        private static void TextRightVS(string s, float right, float y, float h, float scale, Col c) { TextRightS(s, right, TextTop(y, h, scale), scale, c); }
+        private static void TextCenterVS(string s, float cx, float y, float h, float scale, Col c)
+        {
+            float ty = TextTop(y, h, scale);
+            Text(s, cx + 0.0011f, ty + 0.0014f, scale, ShadowOf(c), true);
+            Text(s, cx, ty, scale, c, true);
+        }
+
         /// <summary>Centred text on a background box sized from the text length.</summary>
         private static void Box(string s, float cx, float y, float scale, Col bg, Col fg)
         {
             float w = Math.Min(0.9f, 0.02f + s.Length * scale * 0.026f);
             float h = scale * 0.075f + 0.012f;
-            Rect(cx - w / 2f, y, w, h, bg);
-            TextCenterV(s, cx, y, h, scale, fg);
+            Rect(cx - w / 2f, y, w, h, Glass(bg, bg.A));
+            TextCenterVS(s, cx, y, h, scale, fg);
         }
     }
 
@@ -1928,15 +2006,18 @@ namespace ClaudeMenu
 
     public partial class MenuScript
     {
-        private int lastRealTick;
-        private float realDt = 1f / 60f;   // wall-clock frame time (free camera, FPS)
+        // Wall-clock frame time (free camera, FPS, and every per-frame boost). Stopwatch,
+        // because Environment.TickCount only moves every 10-16 ms on Windows/Proton.
+        private readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        private long lastClockTicks;
+        private float realDt = 1f / 60f;
         private float fpsAvg = 60f;
 
         private void RunFeatures()
         {
-            int t = Environment.TickCount;
-            realDt = U.Clamp((t - lastRealTick) / 1000f, 0.001f, 0.1f);
-            lastRealTick = t;
+            long ticks = clock.ElapsedTicks;
+            realDt = U.Clamp((float)((ticks - lastClockTicks) / (double)System.Diagnostics.Stopwatch.Frequency), 0.001f, 0.1f);
+            lastClockTicks = ticks;
             fpsAvg += (1f / realDt - fpsAvg) * 0.05f;
 
             Ped ped = PlayerPed();
@@ -1968,6 +2049,7 @@ namespace ClaudeMenu
             }
             if (showFps) f.Fps = "FPS " + U.I((int)Math.Round(fpsAvg));
             if (freecamOn) f.Overlay = "FREE CAMERA   L-stick move   R-stick look   RB/LB up/down   RT faster   A teleport here   B exit";
+            if (liveDebug) { f.DebugCar = carDebug; f.DebugFoot = footDebug; }
             FillSpeedo(f);
         }
     }
@@ -1981,12 +2063,29 @@ namespace ClaudeMenu
         private bool godMode, neverWanted, policeIgnore, everyoneIgnore, infSprint;
         private bool noRagdoll, noBikeFall, noDragOut, seatbelt, autoHeal, autoArmour;
 
+        // Super Run / Super Jump, done the way the XMC trainer does them: a small
+        // APPLY_FORCE_TO_PED push every frame while the button is held. (Deck tests
+        // showed SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER and on-ground SET_CHAR_VELOCITY
+        // freeze walking, and a single in-air velocity write is ignored, so neither
+        // is used.) Both are off by default and only push while you hold the button.
+        private bool superRun, superJump;
+        private float runBoost = 5f, jumpBoost = 5f;   // XMC uses 5 for both
+        private const int JumpBoostMs = 600;           // how long a jump keeps pushing (while held)
+        private int jumpUntil;
+        private bool jumpInvincible;                   // we made the player invincible for the landing
+        private int lastAirborne;
+        private float jumpStartZ, jumpPeakZ;
+        private bool jumpTracking;
+        private float runPeak;
+        private int abilityLogLeft = 6;
+
         private static readonly int[] CashAmounts = { 1000, 10000, 100000, 1000000, 10000000 };
         private static readonly string[] CashNames = { "$1,000", "$10,000", "$100,000", "$1,000,000", "$10,000,000" };
 
         private Menu BuildPlayerMenu()
         {
             Menu m = new Menu("Player");
+            m.OnEnter = menu => { abilityLogLeft = 6; };
             m.Header("Health");
             m.Add(new ToggleItem("God Mode", () => godMode, v =>
             {
@@ -2017,6 +2116,12 @@ namespace ClaudeMenu
             m.Add(new ToggleItem("Everyone Ignores You", () => everyoneIgnore, v => { everyoneIgnore = v; N.Call("SET_EVERYONE_IGNORE_PLAYER", pi, v); }));
 
             m.Header("Abilities");
+            m.Add(new ToggleItem("Super Run (experimental)", () => superRun, v => superRun = v,
+                "Hold " + Btn.ToText(cfg.RunButton) + " (sprint) while moving to run faster. Pushes like the XMC trainer; untested on the Deck"));
+            m.Add(new FloatItem("Run Boost", 1f, 10f, 1f, () => runBoost, v => runBoost = v, "0", "", null, "How hard Super Run pushes (5 = XMC's value)"));
+            m.Add(new ToggleItem("Super Jump (experimental)", () => superJump, SetSuperJump,
+                "Hold " + Btn.ToText(cfg.JumpButton) + " (jump) to go higher. You're invincible until you land. Untested on the Deck"));
+            m.Add(new FloatItem("Jump Boost", 1f, 10f, 1f, () => jumpBoost, v => jumpBoost = v, "0", "", null, "How hard Super Jump pushes (5 = XMC's value)"));
             m.Add(new ToggleItem("Unlimited Sprint", () => infSprint, v => { infSprint = v; N.Call("SET_PLAYER_NEVER_GETS_TIRED", pi, v); }));
             m.Add(new ToggleItem("No Ragdoll", () => noRagdoll, v =>
             {
@@ -2110,9 +2215,95 @@ namespace ClaudeMenu
             Notify("You are now " + label);
         }
 
+        private void SetSuperJump(bool v)
+        {
+            superJump = v;
+            if (!v) EndJumpInvincibility(PlayerPed());
+        }
+
+        private void EndJumpInvincibility(Ped ped)
+        {
+            if (!jumpInvincible) return;
+            jumpInvincible = false;
+            if (ped != null && !godMode) N.Call("SET_CHAR_INVINCIBLE", ped, false);
+        }
+
         private void RunPlayerFrame(Ped ped)
         {
             if (neverWanted) N.Call("CLEAR_WANTED_LEVEL", pi);
+
+            footDebug = null;
+            if (!superRun && !superJump && !jumpInvincible && !liveDebug) return;
+
+            bool blocked = open || freecamOn || paused;
+            bool menuChord = input.IsHeld(Btn.LB) && input.IsHeld(Btn.RB);   // probably opening the menu
+            bool onFoot = N.Get<bool>("IS_CHAR_ON_FOOT", false, ped);
+            bool inAir = onFoot && N.Get<bool>("IS_CHAR_IN_AIR", false, ped);
+            float sx = InputState.Axis(input.LX), sy = InputState.Axis(input.LY);
+            float stick = Math.Min(1f, (float)Math.Sqrt(sx * sx + sy * sy));
+            if (!input.Connected && cfg.KeyboardFallback && (Keyboard.IsDown(0x57) || Keyboard.IsDown(0x41) || Keyboard.IsDown(0x53) || Keyboard.IsDown(0x44))) stick = 1f;   // WASD
+            bool runHeld = !blocked && !menuChord && input.ComboHeld(cfg.RunButton);
+            bool jumpHeld = !blocked && !menuChord && input.ComboHeld(cfg.JumpButton);
+            bool jumpPressed = !blocked && !menuChord && (Btn.Count(cfg.JumpButton) == 1 ? input.Pressed(cfg.JumpButton) : input.ComboPressed(cfg.JumpButton));
+            // A push per 30 fps frame (XMC's numbers were made at 30 fps), scaled to this frame.
+            float f30 = U.Clamp(realDt * 30f, 0.25f, 3f);
+            string act = null;
+
+            // Super run: push forward (the ped's own Y axis) every frame while sprinting.
+            if (superRun && onFoot && !inAir && runHeld && stick > 0.3f)
+            {
+                float force = runBoost * f30;
+                // APPLY_FORCE_TO_PED(ped, type 1, x, y, z, offset x/y/z, component 1, local force, local offset, scale by mass): XMC's arguments.
+                N.Call("APPLY_FORCE_TO_PED", ped, 1, 0f, force, 0f, 0f, 0f, 0f, 1, 1, 1, 1);
+                act = "run push " + U.F(force, "0.0");
+                runPeak = Math.Max(runPeak, N.OutFloat("GET_CHAR_SPEED", 0f, ped));
+            }
+            else if (runPeak > 0f)
+            {
+                if (abilityLogLeft > 0) { abilityLogLeft--; Log.Write("Super run: top speed " + U.F(runPeak, "0.0") + " m/s (normal sprint is about 7)"); }
+                runPeak = 0f;
+            }
+
+            // Super jump: push up every frame while jump is held, for up to JumpBoostMs after the press.
+            if (superJump && onFoot)
+            {
+                if (jumpPressed && !inAir)
+                {
+                    jumpUntil = now + JumpBoostMs;
+                    jumpStartZ = jumpPeakZ = ped.Position.Z;
+                    jumpTracking = true;
+                    if (!jumpInvincible && !godMode) { N.Call("SET_CHAR_INVINCIBLE", ped, true); jumpInvincible = true; }
+                }
+                if (jumpUntil != 0 && now < jumpUntil && jumpHeld)
+                {
+                    float force = jumpBoost * f30;
+                    N.Call("APPLY_FORCE_TO_PED", ped, 1, 0f, 0f, force, 0f, 0f, 0f, 1, 1, 1, 1);
+                    act = (act == null ? "" : act + ", ") + "jump push " + U.F(force, "0.0");
+                }
+                else if (jumpUntil != 0 && (now >= jumpUntil || !jumpHeld)) jumpUntil = 0;
+            }
+            if (jumpTracking)
+            {
+                float z = ped.Position.Z;
+                if (z > jumpPeakZ) jumpPeakZ = z;
+            }
+
+            // Invincibility (and the height log) ends a moment after landing.
+            if (inAir || jumpUntil != 0) lastAirborne = now;
+            else if (now - lastAirborne > 1200)
+            {
+                if (jumpTracking)
+                {
+                    jumpTracking = false;
+                    if (abilityLogLeft > 0) { abilityLogLeft--; Log.Write("Super jump: rose " + U.F(jumpPeakZ - jumpStartZ, "0.0") + " m (a normal jump is about 1)"); }
+                }
+                EndJumpInvincibility(ped);
+            }
+
+            if (liveDebug && CurrentVehicle() == null)
+                footDebug = "FOOT  on foot " + YN(onFoot) + "  air " + YN(inAir) + "  stick " + U.F(stick, "0.00")
+                          + "  run btn " + YN(runHeld) + "  jump btn " + YN(jumpHeld) + "  speed " + U.F(N.OutFloat("GET_CHAR_SPEED", 0f, ped), "0.0")
+                          + "  frame " + U.F(realDt * 1000f, "0") + " ms  " + (act ?? "-");
         }
 
         private void RunPlayerSlow(Ped ped)
@@ -2554,6 +2745,7 @@ namespace ClaudeMenu
             }));
             m.Add(new ToggleItem("Show Coordinates", () => showCoords, v => showCoords = v));
             m.Add(new ToggleItem("Show FPS", () => showFps, v => showFps = v));
+            m.Add(new ToggleItem("Live Debug", () => liveDebug, v => liveDebug = v, "Shows what Super Run/Jump and the car multipliers see each frame"));
 
             m.Header("Camera");
             m.Add(new ActionItem("Free Camera", StartFreecam, "Fly the camera around. A teleports you there, B goes back"));
@@ -2669,13 +2861,19 @@ namespace ClaudeMenu
             ActionItem rebOpen = new ActionItem("Rebind Open Combo", () => StartCapture(1));
             ActionItem rebClose = new ActionItem("Rebind Close Combo", () => StartCapture(2));
             ActionItem rebNitro = new ActionItem("Rebind Nitro Button", () => StartCapture(3));
-            m.Add(rebOpen); m.Add(rebClose); m.Add(rebNitro);
+            ActionItem rebJump = new ActionItem("Set Jump Button", () => StartCapture(4));
+            ActionItem rebRun = new ActionItem("Set Sprint Button", () => StartCapture(5));
+            m.Add(rebOpen); m.Add(rebClose); m.Add(rebNitro); m.Add(rebJump); m.Add(rebRun);
             m.Add(new ToggleItem("Freeze Player While Open", () => cfg.FreezePlayer, v =>
             {
                 cfg.FreezePlayer = v;
-                if (!v && weFroze) { N.Call("SET_PLAYER_CONTROL", pi, true); weFroze = false; }
-                if (v && !weFroze) weFroze = N.Call("SET_PLAYER_CONTROL", pi, false);
+                FreezePlayer(v && open);
             }, "Stops menu buttons also moving Niko"));
+            m.Add(new ToggleItem("Camera Moves While Open", () => cfg.CameraWhileOpen, v =>
+            {
+                cfg.CameraWhileOpen = v;
+                if (open && weFroze) { FreezePlayer(false); FreezePlayer(true); }
+            }, "The right stick keeps turning the camera while the menu is open"));
             m.Add(new ToggleItem("Left Stick Navigation", () => cfg.StickNavigation, v => { cfg.StickNavigation = v; ApplyInputConfig(); }));
             m.Add(new ToggleItem("Keyboard Fallback", () => cfg.KeyboardFallback, v => { cfg.KeyboardFallback = v; ApplyInputConfig(); }, "F4 / arrows / Enter / Backspace"));
 
@@ -2686,6 +2884,7 @@ namespace ClaudeMenu
             m.Add(new ListItem("Theme", themeNames.ToArray(), () => cfg.Theme, v => cfg.Theme = v, true, null));
             m.Add(new NumberItem("Menu Size", 70, 150, 10, () => (int)Math.Round(cfg.Scale * 100), v => cfg.Scale = v / 100f, true, "%", "Bigger is easier to read on the Deck's 7\" screen"));
             m.Add(new NumberItem("Rows Shown", 6, 16, 1, () => cfg.MaxVisible, v => cfg.MaxVisible = v, true, "", null));
+            m.Add(new NumberItem("Menu Opacity", 40, 100, 10, () => cfg.Opacity, v => cfg.Opacity = v, true, "%", "Lower lets the game show through the menu"));
 
             m.Header("Saving");
             m.Add(new ToggleItem("Save When Menu Closes", () => cfg.SaveOnClose, v => { cfg.SaveOnClose = v; cfg.Save(); }, "Writes ClaudeMenu.ini every time you close the menu"));
@@ -2702,6 +2901,8 @@ namespace ClaudeMenu
                 rebOpen.Help = "Current: " + Btn.ToText(cfg.OpenCombo);
                 rebClose.Help = "Current: " + Btn.ToText(cfg.CloseCombo);
                 rebNitro.Help = "Current: " + Btn.ToText(cfg.NitroCombo) + ". One button is fine";
+                rebJump.Help = "The game's jump button, which Super Jump listens for. Current: " + Btn.ToText(cfg.JumpButton);
+                rebRun.Help = "The game's sprint button, which Super Run listens for. Current: " + Btn.ToText(cfg.RunButton);
             };
             return m;
         }
@@ -3301,59 +3502,68 @@ namespace ClaudeMenu
 
     #region Vehicles: performance multipliers, nitro and speedometer
     //
-    //  GTA IV has no native for engine power, torque or brake force (no GTA V-style
-    //  SET_VEHICLE_ENGINE_POWER_MULTIPLIER), and editing handling data in memory is
-    //  version-specific and unsafe from a loose script.
+    //  GTA IV has no native for engine power, torque or brake force, and editing
+    //  handling data in memory is version-specific and unsafe from a loose script.
+    //  The multipliers copy what working GTA IV trainers do instead:
     //
-    //  Rule learned on the Deck: writing the player's or the car's speed, velocity
-    //  or animation state EVERY FRAME fights the game and breaks movement.
-    //   - per-frame APPLY_FORCE_TO_CAR deltas: no visible effect
-    //   - SET_CAR_FORWARD_SPEED every frame: the car didn't move at all
-    //   - SET_CHAR_VELOCITY / SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER on foot: froze walking
+    //   - The XMC mod menu's "NFS mode" calls SET_CAR_FORWARD_SPEED(car, speed * 1.02)
+    //     every frame while RT is held, with the speed read from the game just
+    //     before. It never sets the car slower than it's going, and never
+    //     multiplies by the frame time.
+    //   - Forward speed comes from GET_CAR_SPEED_VECTOR(car, &v, true): the car's
+    //     own frame, Y = forward, X = sideways. (Rockstar's scripts use flag 0 for
+    //     world space; LotsofEds' downforce mod reads .Y of the flag-1 vector.)
     //
-    //  So power, brakes, nitro and the top speed limit are "speed kicks": the
-    //  wanted change is summed over KickMs (200 ms) and applied as one
-    //  SET_CAR_FORWARD_SPEED call, at most every KickMs:
-    //   Engine power  (mult - 1) x throttle x 3.5 m/s^2, tapering at high speed.
-    //                 Only once the car is rolling (>= 3 m/s) under its own power.
-    //   Brakes        (mult - 1) x brake x 6 m/s^2 while moving forward; never
-    //                 below 0.5 m/s, so it can't push you into reverse.
-    //   Nitro         a fixed push while the nitro button is held (off by default).
-    //   Top speed     kicks are clamped to the limit; above it, one kick back down.
-    //  No kicks while the menu is open, in the air, with the handbrake held, while
-    //  reversing or nearly stopped, or when you aren't the driver. The first kicks
-    //  are logged as "Power kick: a -> b m/s (why)" in ClaudeMenu.log.
-    //  UNTESTED on the Deck until the owner confirms it.
+    //  Deck history: per-frame boosts scaled by GET_FRAME_TIME did nothing as
+    //  forces, and pinned the car as speed writes. If GET_FRAME_TIME reads ~0
+    //  on Proton both results follow, so the boost now uses the wall clock and
+    //  the live debug line shows both values.
     //
-    //  Grip and handbrake assists still use per-frame APPLY_FORCE_TO_CAR, which
-    //  showed no visible effect, so they only run with "Force Assists
-    //  (experimental)" switched on, and that is off by default.
+    //  Each frame the wanted forward speed is computed:
+    //    Engine power  + (0.0022 x speed + 0.03) x (mult - 1) x throttle  per 30 fps frame
+    //    Nitro         + 0.25 / 0.4 / 0.7 m/s per 30 fps frame while held
+    //    Brakes        - 0.15 x (mult - 1) x brake, never below 0.3 m/s
+    //    Handbrake     - 0.12 x (mult - 1) while RB is held
+    //    Top speed     the result is clamped to the limit
+    //  and applied with the chosen Boost Method:
+    //    Smooth  SET_CAR_FORWARD_SPEED every frame (XMC's approach, the default)
+    //    Pulses  the change summed over 200 ms, then one SET_CAR_FORWARD_SPEED
+    //    Force   APPLY_FORCE_TO_CAR(type 3, local) every frame, as ScriptHookDotNet's
+    //            ApplyForceRelative and LotsofEds' downforce mod do
+    //  Speed-ups only happen while moving forward (>= 1 m/s), on the ground,
+    //  with the handbrake released, the menu closed, and you driving. With every
+    //  setting at stock (the default) none of this touches the car.
     //
-    //  Limits: kicks change the car's speed along its nose, so gear ratios,
-    //  engine sound and wheelspin don't change the way real handling edits would.
-    //  Throttle is read from the controller triggers (RT/LT) or W/S on a keyboard.
+    //  Grip assist pushes against the sideways slide with APPLY_FORCE_TO_CAR and
+    //  stays experimental (off by default).
+    //
+    //  ALL OF THIS IS UNTESTED ON THE DECK until the owner confirms it.
     //
 
     public partial class MenuScript
     {
-        private const float BaseAccel = 3.5f, BaseBrake = 6.0f, BaseHandbrake = 4.0f;
-        private static readonly float[] NitroAccel = { 7f, 11f, 18f };
+        private static readonly string[] BoostMethodNames = { "Smooth", "Pulses", "Force" };
+        private const float PowerGrowth = 0.0022f;   // x speed, per (mult - 1), per 30 fps frame
+        private const float PowerAdd = 0.03f;        // m/s, per (mult - 1), per 30 fps frame
+        private const float BrakeDrop = 0.15f;       // m/s, per (mult - 1), per 30 fps frame
+        private const float HandbrakeDrop = 0.12f;   // m/s, per (mult - 1), per 30 fps frame
+        private const float MinBoostSpeed = 1.0f;    // m/s; no speed-ups below this (or in reverse)
+        private const int PulseMs = 200;
+        private static readonly float[] NitroAdd = { 0.25f, 0.4f, 0.7f };   // m/s per 30 fps frame
         private static readonly string[] NitroNames = { "Mild", "Strong", "Insane" };
 
-        private bool sameTuneEverywhere, nitroEnabled, infiniteNitro;   // nitro is off by default: it changes the car's speed
-        private bool forceAssists;   // experimental grip/handbrake forces, off by default
+        private bool sameTuneEverywhere = true;   // one tuning for everything you drive (per-vehicle is optional)
+        private bool nitroEnabled, infiniteNitro; // nitro is off by default: it changes the car's speed
+        private bool gripAssist;                  // experimental grip force, off by default
+        private bool liveDebug;                   // on-screen values for testing
         private int nitroPower = 1;
         private readonly Tuning globalTune = new Tuning();
 
-        // Per-frame tracking
-        private int trackHandle;
-        private const int KickMs = 200;
-        private const float MinKickSpeed = 3f;   // m/s; no speed-up kicks below this
-        private bool kickWaitLogged;
-        private float kickDv;
-        private int lastKick, kickDiagLeft = 6;
-        private Vector3 lastPos, velAvg;
+        // Per-frame state
         private float thrAvg, brkAvg;
+        private float pulseDv;
+        private int lastPulse;
+        private int boostLogLeft = 8;
         private float nitroLevel = 1f;
         private int lastNitroUse;
         private bool nitroActive;
@@ -3362,6 +3572,7 @@ namespace ClaudeMenu
         private bool hudInVehicle, hudTunable;
         private float hudSpeed;
         private string hudTune;
+        private string carDebug, footDebug;
 
         private Tuning TuneFor(VehState st) { return sameTuneEverywhere ? globalTune : st.Tune; }
 
@@ -3376,8 +3587,8 @@ namespace ClaudeMenu
         private Menu BuildPerformanceMenu()
         {
             Menu m = new Menu("Performance");
-            // Each visit re-arms the "Power kick" log lines, so every test run gets fresh ones.
-            m.OnEnter = menu => { kickDiagLeft = 6; kickWaitLogged = false; };
+            // Each visit re-arms the "Boost" log lines, so every test run gets fresh ones.
+            m.OnEnter = menu => { boostLogLeft = 8; };
             m.Add(new InfoItem("Tuning", () =>
             {
                 if (sameTuneEverywhere) return "every vehicle";
@@ -3385,26 +3596,28 @@ namespace ClaudeMenu
                 return v == null ? "(get in a vehicle)" : ModelLabel(StateFor(v).Model);
             }));
 
-            m.Header("Multipliers (untested on the Deck)");
+            m.Header("Multipliers (experimental)");
             m.Add(new FloatItem("Engine Power", 1f, 10f, 0.5f, () => EditTune().Power, v => EditTune().Power = v, "0.0", "x", null,
-                "Speed kicks while you hold RT, once you're rolling (11+ km/h). A resets to 1.0x"));
+                "Extra speed while you hold RT and are moving forward. A resets to 1.0x"));
             m.Add(new FloatItem("Brakes", 1f, 10f, 0.5f, () => EditTune().Brakes, v => EditTune().Brakes = v, "0.0", "x", null,
                 "Stronger braking (LT) while moving forward. Never pushes you into reverse"));
+            m.Add(new FloatItem("Handbrake", 1f, 5f, 0.5f, () => EditTune().Handbrake, v => EditTune().Handbrake = v, "0.0", "x", null,
+                "Stronger stopping while the handbrake (RB) is held"));
             m.Add(new FloatItem("Top Speed Limit", 0f, 400f, 10f, () => EditTune().TopSpeedKmh, v => EditTune().TopSpeedKmh = (int)Math.Round(v), "0", " km/h", "Off",
-                "Power and nitro won't take you past this; above it you're slowed back down"));
+                "Power and nitro won't take you past this; above it you're held at the limit"));
 
-            m.Header("Nitro (untested on the Deck)");
+            m.Header("Nitro (experimental)");
             m.Add(new ToggleItem("Nitro", () => nitroEnabled, v => nitroEnabled = v, "Off by default. Hold " + Btn.ToText(cfg.NitroCombo) + " while driving. Rebind in Settings"));
             m.Add(new ListItem("Nitro Power", NitroNames, () => nitroPower, v => nitroPower = v, true, null));
             m.Add(new ToggleItem("Infinite Nitro", () => infiniteNitro, v => infiniteNitro = v));
 
-            m.Header("Experimental");
-            m.Add(new ToggleItem("Force Assists (experimental)", () => forceAssists, v => forceAssists = v,
-                "Grip and handbrake below use per-frame forces, which showed no effect on the Deck. Off by default"));
-            m.Add(new FloatItem("Grip Assist", 0f, 10f, 1f, () => EditTune().Grip, v => EditTune().Grip = (int)Math.Round(v), "0", "", "Off",
-                "Experimental: cuts sideways sliding. Only works with Force Assists on"));
-            m.Add(new FloatItem("Handbrake", 1f, 5f, 0.5f, () => EditTune().Handbrake, v => EditTune().Handbrake = v, "0.0", "x", null,
-                "Experimental: stronger stopping with RB. Only works with Force Assists on"));
+            m.Header("How It's Applied");
+            m.Add(new ListItem("Boost Method", BoostMethodNames, () => cfg.BoostMethod, v => { cfg.BoostMethod = v; pulseDv = 0f; }, true,
+                "Smooth: every frame (XMC trainer). Pulses: 5 per second. Force: physics push. Try another if one does nothing"));
+            m.Add(new ToggleItem("Grip Assist (experimental)", () => gripAssist, v => gripAssist = v, "Uses physics forces, which showed no effect in an earlier Deck test. Off by default"));
+            m.Add(new FloatItem("Grip Strength", 1f, 10f, 1f, () => Math.Max(1, EditTune().Grip), v => EditTune().Grip = (int)Math.Round(v), "0", "", null,
+                "How hard Grip Assist fights sliding (needs Grip Assist on)"));
+            m.Add(new ToggleItem("Live Debug", () => liveDebug, v => liveDebug = v, "Shows what the multipliers see and do each frame, for testing"));
 
             m.Header("Apply To");
             m.Add(new ToggleItem("Same Tuning on Every Vehicle", () => sameTuneEverywhere, v =>
@@ -3415,7 +3628,7 @@ namespace ClaudeMenu
                     if (car != null) globalTune.CopyFrom(StateFor(car).Tune);
                 }
                 sameTuneEverywhere = v;
-            }, "Off: each vehicle keeps its own tuning. On: one tuning for everything you drive"));
+            }, "On (default): one tuning for everything you drive. Off: each vehicle keeps its own"));
             m.Add(new ActionItem("Reset to Stock", () => { EditTune().CopyFrom(new Tuning()); Notify("Tuning reset"); }));
 
             m.Header("Display");
@@ -3424,31 +3637,15 @@ namespace ClaudeMenu
             return m;
         }
 
-        private static Vector3 CarForward(Vehicle v)
-        {
-            Pointer fp = new Pointer(typeof(Vector3));
-            if (N.Call("GET_CAR_FORWARD_VECTOR", v, fp))
-            {
-                Vector3 f = (Vector3)fp;
-                if (U.Len(f) > 0.5f) return U.Norm(f);
-            }
-            return U.HeadingDir(N.OutFloat("GET_CAR_HEADING", 0f, v));
-        }
-
-        private static Vector3 CarPosition(Vehicle v)
-        {
-            Pointer x = new Pointer(typeof(float)), y = new Pointer(typeof(float)), z = new Pointer(typeof(float));
-            return N.Call("GET_CAR_COORDINATES", v, x, y, z) ? U.V((float)x, (float)y, (float)z) : v.Position;
-        }
-
         private void RunVehicleFrame(Ped ped)
         {
             nitroActive = false;
+            carDebug = null;
             Vehicle v = CurrentVehicle();
             if (v == null)
             {
                 hudInVehicle = false;
-                trackHandle = 0;
+                pulseDv = 0f;
                 RefillNitro();
                 return;
             }
@@ -3459,20 +3656,8 @@ namespace ClaudeMenu
 
             VehState st = StateFor(v);
             hudTunable = st.Kind == 1;
-
-            // Direction of travel, from how far the car moved since last frame
-            // (GET_CAR_SPEED gives the exact magnitude).
-            Vector3 pos = CarPosition(v);
-            if (trackHandle != H(v)) { trackHandle = H(v); velAvg = new Vector3(); kickDv = 0f; }
-            else if (dt > 0f)
-            {
-                Vector3 raw = U.Mul(U.Sub(pos, lastPos), 1f / dt);
-                velAvg = U.Len(raw) < 150f ? U.Lerp(velAvg, raw, Math.Min(1f, dt * 20f)) : new Vector3();
-            }
-            lastPos = pos;
-
-            // Only the driver of a car or bike gets tuning; anything else drops pending kicks.
-            if (st.Kind != 1 || !IsDriver(v, ped)) { kickDv = 0f; RefillNitro(); return; }
+            Tuning tu = TuneFor(st);
+            bool driver = IsDriver(v, ped);
 
             bool blocked = open || freecamOn || paused;
             bool kb = !input.Connected && cfg.KeyboardFallback;
@@ -3480,102 +3665,130 @@ namespace ClaudeMenu
             float brk = blocked ? 0f : Math.Max(InputState.Trigger(input.LeftTrigger), kb && Keyboard.IsDown(0x53) ? 1f : 0f);    // S
             bool hb = !blocked && (input.IsHeld(Btn.RB) || (kb && Keyboard.IsDown(0x20)));                                          // Space
             bool nitroHeld = !blocked && nitroEnabled && input.ComboHeld(cfg.NitroCombo);
-            float k = Math.Min(1f, dt * 10f);
-            thrAvg += (thr - thrAvg) * k;
-            brkAvg += (brk - brkAvg) * k;
+            // Ease in when the trigger is pressed (no jolt), but stop the moment it's released.
+            float k = Math.Min(1f, realDt * 12f);
+            thrAvg = thr < 0.05f ? 0f : thrAvg + (thr - thrAvg) * k;
+            brkAvg = brk < 0.05f ? 0f : brkAvg + (brk - brkAvg) * k;
 
-            Tuning tu = TuneFor(st);
-            bool assists = forceAssists && (tu.Grip > 0 || tu.Handbrake > 1.001f);
-            bool kicks = tu.Power > 1.001f || tu.Brakes > 1.001f || tu.TopSpeedKmh > 0 || nitroHeld;
-            if (!kicks && !assists) { kickDv = 0f; RefillNitro(); return; }
-
-            Vector3 fwd = CarForward(v);
-            Vector3 dir = U.Len(velAvg) > 0.5f ? U.Norm(velAvg) : fwd;
-            Vector3 vel = U.Mul(dir, speed);
-            float fwdSpeed = U.Dot(vel, fwd);
-            bool inAir = N.Get<bool>("IS_CAR_IN_AIR_PROPER", false, v);
-            float scale = cfg.ForceScale;
-
-            // ---- Speed kicks: power, brakes, nitro, top speed limit -------------
-            // Deck tests: per-frame APPLY_FORCE_TO_CAR deltas had no visible effect,
-            // and SET_CAR_FORWARD_SPEED every frame stopped the car moving at all
-            // (writing speed every frame fights the game). So the change is summed
-            // over KickMs and applied as ONE SET_CAR_FORWARD_SPEED call at most
-            // every KickMs. Never while the menu is open, in the air, with the
-            // handbrake held, or while reversing / nearly stopped.
-            bool noKick = blocked || inAir || hb || fwdSpeed < 0.5f;
-            float dvF = 0f;
-            if (!noKick)
+            bool wantsGrip = gripAssist && tu.Grip > 0;
+            if (st.Kind != 1 || !driver || (tu.IsStock && !nitroHeld && !wantsGrip))
             {
-                bool rolling = fwdSpeed >= MinKickSpeed;   // speed-ups only once rolling under the car's own power
-                if (rolling && tu.Power > 1.001f && thrAvg > 0.02f)
+                pulseDv = 0f;
+                RefillNitro();
+                if (liveDebug) carDebug = "CAR  driver " + YN(driver) + "  tunable " + YN(st.Kind == 1) + "  stock " + YN(tu.IsStock) + "  speed " + U.F(speed, "0.0") + "  RT " + U.F(thrAvg, "0.00") + "  (nothing to apply)";
+                return;
+            }
+
+            // Signed speeds in the car's own frame: Y forward, X sideways.
+            Pointer lp = new Pointer(typeof(Vector3));
+            bool haveLocal = N.Call("GET_CAR_SPEED_VECTOR", v, lp, true);
+            Vector3 local = haveLocal ? (Vector3)lp : new Vector3(0f, speed, 0f);
+            float fwd = local.Y;
+            bool inAir = N.Get<bool>("IS_CAR_IN_AIR_PROPER", false, v);
+            // This frame as a fraction of a 30 fps frame (XMC's tuning was made at 30 fps), in game time.
+            float f30 = U.Clamp(realDt * 30f, 0.25f, 3f) * GameData.TimeScales[timeScaleIndex];
+
+            float add = 0f;
+            string why = null;
+            bool grounded = !blocked && !inAir;
+            if (grounded && !hb && fwd >= MinBoostSpeed)
+            {
+                if (tu.Power > 1.001f && thrAvg > 0.05f)
                 {
-                    float taper = Math.Max(0.3f, 1f - speed / 90f);
-                    dvF += (tu.Power - 1f) * thrAvg * BaseAccel * taper * dt;
+                    add += (fwd * PowerGrowth + PowerAdd) * (tu.Power - 1f) * thrAvg * f30;
+                    why = "power";
                 }
-                if (tu.Brakes > 1.001f && brkAvg > 0.02f && fwdSpeed > 1f)
-                    dvF -= (tu.Brakes - 1f) * brkAvg * BaseBrake * dt;
-                if (rolling && nitroHeld && nitroLevel > 0f)
+                if (nitroHeld && nitroLevel > 0f)
                 {
-                    dvF += NitroAccel[nitroPower] * dt;
+                    add += NitroAdd[nitroPower] * f30;
                     nitroActive = true;
                     lastNitroUse = now;
-                    if (!infiniteNitro) nitroLevel = Math.Max(0f, nitroLevel - dt / 3.5f);
-                }
-                else if (!rolling && !kickWaitLogged && ((tu.Power > 1.001f && thrAvg > 0.02f) || nitroHeld))
-                {
-                    kickWaitLogged = true;
-                    Log.Write("Power: no kicks below " + U.F(MinKickSpeed, "0") + " m/s (now " + U.F(fwdSpeed, "0.0") + "); the car has to be rolling first");
+                    if (!infiniteNitro) nitroLevel = Math.Max(0f, nitroLevel - realDt / 3.5f);
+                    why = "nitro";
                 }
             }
             if (!nitroActive) RefillNitro();
-            if (noKick) kickDv = 0f; else kickDv += dvF * scale;
-
-            if (now - lastKick >= KickMs)
+            if (grounded && fwd > MinBoostSpeed)
             {
-                lastKick = now;
-                float cap = tu.TopSpeedKmh > 0 ? tu.TopSpeedKmh / 3.6f : 0f;
-                string why = null;
-                float target = fwdSpeed;
-                if (!noKick)
+                if (tu.Brakes > 1.001f && brkAvg > 0.05f)
                 {
-                    if (kickDv > 0.05f && fwdSpeed >= MinKickSpeed) { target = fwdSpeed + kickDv; why = nitroActive ? "nitro" : "power"; }
-                    else if (kickDv < -0.05f) { target = Math.Max(0.5f, fwdSpeed + kickDv); why = "brakes"; }
-                    if (cap > 0f && target > cap) { target = Math.Min(target, Math.Max(cap, 0.5f)); why = "top speed limit"; }
-                    if (why == null && cap > 0f && fwdSpeed > cap + 0.5f) { target = cap; why = "top speed limit"; }
+                    add -= BrakeDrop * (tu.Brakes - 1f) * brkAvg * f30;
+                    why = "brakes";
                 }
-                if (why != null && Math.Abs(target - fwdSpeed) > 0.05f)
+                if (tu.Handbrake > 1.001f && hb)
                 {
-                    N.Call("SET_CAR_FORWARD_SPEED", v, target);
-                    if (kickDiagLeft > 0) { kickDiagLeft--; Log.Write("Power kick: " + U.F(fwdSpeed, "0.0") + " -> " + U.F(target, "0.0") + " m/s (" + why + ")"); }
+                    add -= HandbrakeDrop * (tu.Handbrake - 1f) * f30;
+                    why = "handbrake";
                 }
-                kickDv = 0f;
+                if (add < 0f) add = Math.Max(add, 0.3f - fwd);   // never below 0.3 m/s forward
+            }
+            float target = fwd + add * cfg.ForceScale;
+            if (tu.TopSpeedKmh > 0 && grounded && fwd > 0f)
+            {
+                float cap = tu.TopSpeedKmh / 3.6f;
+                if (target > cap && (add > 0f || fwd > cap + 0.3f)) { target = Math.Max(cap, 0.3f); why = "top speed limit"; }
             }
 
-            // ---- Experimental force assists: grip and handbrake ------------------
-            // Per-frame APPLY_FORCE_TO_CAR, the approach that showed no visible
-            // effect on the Deck. Off unless "Force Assists (experimental)" is on.
-            if (assists && !blocked && !inAir)
+            string did = ApplyBoost(v, fwd, target, why, grounded && !hb);
+
+            // Experimental grip: push against the sideways slide (local X), as a physics force.
+            if (wantsGrip && grounded && speed > 3f && Math.Abs(local.X) > 0.05f)
             {
-                Vector3 dvW = new Vector3();
-                if (tu.Handbrake > 1.001f && hb && speed > 1f)
-                    dvW = U.Sub(dvW, U.Mul(dir, Math.Min((tu.Handbrake - 1f) * BaseHandbrake * dt, speed - 0.5f)));
-                if (tu.Grip > 0 && speed > 3f)
-                {
-                    Vector3 side = U.Sub(vel, U.Mul(fwd, fwdSpeed));
-                    side = U.V(side.X, side.Y, 0f);
-                    dvW = U.Sub(dvW, U.Mul(side, Math.Min(1f, tu.Grip * 1.2f * dt)));
-                }
-                // APPLY_FORCE_TO_CAR(car, type 3, x, y, z, spinX, spinY, spinZ, 0, relative, 1, 1): the
-                // same arguments ScriptHookDotNet's Vehicle.ApplyForce uses.
-                if (U.Len(dvW) > 1e-4f)
-                    N.Call("APPLY_FORCE_TO_CAR", v, 3, dvW.X * scale, dvW.Y * scale, dvW.Z * scale, 0f, 0f, 0f, 0, 0, 1, 1);
+                float push = -local.X * Math.Min(1f, tu.Grip * 0.03f * f30) * cfg.ForceScale;
+                N.Call("APPLY_FORCE_TO_CAR", v, 3, push, 0f, 0f, 0f, 0f, 0f, 0, 1, 1, 1);
+                if (did == null) did = "grip " + U.F(push, "0.00");
             }
+
+            if (liveDebug)
+                carDebug = "CAR  driver Y  air " + YN(inAir) + "  RT " + U.F(thrAvg, "0.00") + "  LT " + U.F(brkAvg, "0.00") + "  RB " + YN(hb)
+                         + "  fwd " + U.F(fwd, "0.0") + "  side " + U.F(local.X, "0.0") + " m/s" + (haveLocal ? "" : " (no vector)")
+                         + "  frame " + U.F(realDt * 1000f, "0") + " ms (game says " + U.F(dt * 1000f, "0") + ")"
+                         + "  " + BoostMethodNames[cfg.BoostMethod].ToLowerInvariant() + ": " + (did ?? "-");
         }
+
+        /// <summary>Move the car's forward speed from fwd to target with the chosen method. Returns what it did.</summary>
+        private string ApplyBoost(Vehicle v, float fwd, float target, string why, bool pulsesAllowed)
+        {
+            float delta = target - fwd;
+            string did = null;
+            if (cfg.BoostMethod == 1)
+            {
+                // Pulses: sum the change, apply it at most every PulseMs.
+                if (!pulsesAllowed && delta > 0f) pulseDv = 0f;
+                else if (Math.Abs(delta) > 0.0005f) pulseDv += delta;
+                if (now - lastPulse >= PulseMs)
+                {
+                    lastPulse = now;
+                    if (Math.Abs(pulseDv) > 0.05f)
+                    {
+                        float t = Math.Max(0.3f, fwd + pulseDv);
+                        N.Call("SET_CAR_FORWARD_SPEED", v, t);
+                        did = U.F(fwd, "0.0") + " -> " + U.F(t, "0.0") + " (" + (why ?? "pulse") + ")";
+                    }
+                    pulseDv = 0f;
+                }
+            }
+            else if (Math.Abs(delta) > 0.0005f)
+            {
+                if (cfg.BoostMethod == 2)
+                    N.Call("APPLY_FORCE_TO_CAR", v, 3, 0f, delta, 0f, 0f, 0f, 0f, 0, 1, 1, 1);   // local, scaled by mass
+                else
+                    N.Call("SET_CAR_FORWARD_SPEED", v, target);
+                did = U.F(fwd, "0.00") + " -> " + U.F(target, "0.00") + " (" + (why ?? "?") + ")";
+            }
+            if (did != null && boostLogLeft > 0)
+            {
+                boostLogLeft--;
+                Log.Write("Boost " + BoostMethodNames[cfg.BoostMethod].ToLowerInvariant() + ": " + did + " m/s");
+            }
+            return did;
+        }
+
+        private static string YN(bool b) { return b ? "Y" : "N"; }
 
         private void RefillNitro()
         {
-            if (nitroLevel < 1f && now - lastNitroUse > 1500) nitroLevel = Math.Min(1f, nitroLevel + dt / 12f);
+            if (nitroLevel < 1f && now - lastNitroUse > 1500) nitroLevel = Math.Min(1f, nitroLevel + realDt / 12f);
         }
 
         private void FillSpeedo(FrameView f)
