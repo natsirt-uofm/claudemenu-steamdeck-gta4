@@ -1258,7 +1258,7 @@ namespace ClaudeMenu
         public bool NitroShown, NitroActive;
         public float NitroLevel;           // 0..1
 
-        public string Coords, Fps, Overlay, DebugCar, DebugFoot;
+        public string Coords, Fps, Overlay, DebugCar, DebugFoot, Chaos;
         public float Opacity = 0.85f;
         public string Toast;
         public int ToastUntil;
@@ -1270,7 +1270,7 @@ namespace ClaudeMenu
 
     public partial class MenuScript : Script
     {
-        private const string Version = "1.2.0";
+        private const string Version = "1.3.0";
 
         private readonly Config cfg = new Config();
         private readonly InputState input = new InputState();
@@ -1625,6 +1625,7 @@ namespace ClaudeMenu
             root.Add(new SubmenuItem(BuildVehicleMenu(), "Spawner, customs garage, performance tuning, presets"));
             root.Add(new SubmenuItem(BuildWeaponMenu(), "Give weapons, infinite ammo, no reload"));
             root.Add(new SubmenuItem(BuildWorldMenu(), "Time, weather, traffic, gravity, slow motion"));
+            root.Add(new SubmenuItem(BuildChaosMenu(), "Carmageddon-style car magnet, car rain, black hole, tornado, riots and more"));
             root.Add(new SubmenuItem(BuildTeleportMenu(), "Waypoint, saved slots, Liberty City landmarks"));
             root.Add(new SubmenuItem(BuildMiscMenu(), "HUD, free camera, speedometer, coordinates"));
             root.Add(new SubmenuItem(BuildSettingsMenu(), "Controls, look and saving"));
@@ -1748,6 +1749,7 @@ namespace ClaudeMenu
                 if (f.Fps != null) TextRightS(f.Fps, 0.985f, 0.005f, 0.26f, Col.FromArgb(240, 255, 255, 140));
                 if (f.Overlay != null) Box(f.Overlay, 0.5f, 0.90f, 0.28f, Col.FromArgb(170, 0, 0, 0), Col.White);
                 if (f.DebugCar != null || f.DebugFoot != null) DrawDebug(f);
+                if (f.Chaos != null) Box(f.Chaos, 0.5f, 0.004f, 0.21f, Col.FromArgb(170, 70, 10, 10), Col.FromArgb(255, 255, 200, 120));
                 if (f.Toast != null && t < f.ToastUntil) DrawToast(f);
             }
             catch (Exception ex)
@@ -1869,7 +1871,8 @@ namespace ClaudeMenu
             // Tooltip for the selected item (wraps to two lines).
             if (!string.IsNullOrEmpty(f.Help))
             {
-                float hh = rowH * 1.5f;
+                // Two lines fit about 46 characters each at this size; give long tips a third line.
+                float hh = rowH * (f.Help.Length > 88 ? 2.1f : 1.5f);
                 Rect(x, y + 0.002f, w, hh, Glass(210, 14, 14, 18));
                 Rect(x, y + 0.002f, 0.0025f * s, hh, Col.FromArgb(255, 255, 214, 110));
                 if (gfx != null)
@@ -2028,6 +2031,7 @@ namespace ClaudeMenu
             RunWorldFrame();
             RunMiscFrame();
             RunVehicleFrame(ped);
+            RunChaos(ped);
 
             // Things that don't need to run every frame.
             if (now < nextSlowTick) return;
@@ -2050,6 +2054,7 @@ namespace ClaudeMenu
             if (showFps) f.Fps = "FPS " + U.I((int)Math.Round(fpsAvg));
             if (freecamOn) f.Overlay = "FREE CAMERA   L-stick move   R-stick look   RB/LB up/down   RT faster   A teleport here   B exit";
             if (liveDebug) { f.DebugCar = carDebug; f.DebugFoot = footDebug; }
+            f.Chaos = chaosBadge;
             FillSpeedo(f);
         }
     }
@@ -3805,6 +3810,522 @@ namespace ClaudeMenu
             f.NitroShown = hudTunable && nitroEnabled;
             f.NitroLevel = nitroLevel;
             f.NitroActive = nitroActive;
+        }
+    }
+
+    #endregion
+
+    #region Chaos: world-changing modes
+    //
+    //  Carmageddon-style car magnet, car rain, black hole, tornado, riots and more.
+    //  Ideas and force sizes come from GTA IV chaos mods with public source:
+    //  ChaosIV (Jumpy Vehicles, Earthquake, launches, coloured traffic, flee,
+    //  everyone out, mass breakdown) and TORISOUP's Inferno "Parupunte" script
+    //  (repulsion field: ragdoll, then a push of 3 per 100 ms tick; Crazy City:
+    //  car speed +/-30 every 500 ms; floaty cars: up 0.9 per tick). Both run on
+    //  a 100 ms tick, so this does too.
+    //
+    //  Rules: every mode is off by default; nothing here ever touches the player
+    //  or the player's vehicle; mission characters and vehicles are skipped
+    //  (IS_PED_A_MISSION_PED / IS_CAR_A_MISSION_CAR), so story missions keep
+    //  their cars and people; each tick handles at most MaxChaosCars cars and
+    //  MaxChaosPeds people; "Stop All Chaos" switches everything off and undoes
+    //  what can be undone (riot relationships, mad drivers, invisible cars).
+    //
+
+    public partial class MenuScript
+    {
+        private const int ChaosTickMs = 100;
+        private const int MaxChaosCars = 40, MaxChaosPeds = 30;
+        private const int MaxRainCars = 20;
+
+        // Continuous modes (all off by default)
+        private bool carMagnet, carRain, jumpyTraffic, floatyCars, crazyTraffic, madDrivers, rainbowTraffic, honkChorus, ghostTraffic;
+        private bool blackHole, tornado, earthquake, repulsor, meteors, timeLapse, weatherRoulette;
+        private bool riot, riotTargetsYou;
+        private float chaosRadius = 70f, chaosStrength = 5f;
+
+        // State
+        private int nextChaosTick, lastChaosTick;
+        private int chaosSlowAt, crazyAt, rainbowAt, honkAt, meteorAt, riotAt, weatherAt, rumbleAt;
+        private Vector3 holeCenter;
+        private float tornadoAngle;
+        private readonly List<Vehicle> rainCars = new List<Vehicle>();
+        private int rainModel, rainRequestedAt, nextRainSpawn;
+        private readonly Dictionary<int, Ped> rioters = new Dictionary<int, Ped>();      // by handle
+        private readonly Dictionary<int, Vehicle> hiddenCars = new Dictionary<int, Vehicle>();
+        private string chaosBadge;
+
+        private static readonly int[] RiotGroups = { 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21 };   // civilians, gangs, dealer, criminal, bum, prostitute
+        private static readonly int[] RiotWeapons = { 1, 3, 7, 9, 10, 12, 13, 14 };                                      // bat, knife, pistols, shotgun, SMGs, rifle
+
+        private bool AnyChaos
+        {
+            get
+            {
+                return carMagnet || carRain || jumpyTraffic || floatyCars || crazyTraffic || madDrivers || rainbowTraffic || honkChorus || ghostTraffic
+                    || blackHole || tornado || earthquake || repulsor || meteors || timeLapse || weatherRoulette || riot;
+            }
+        }
+
+        private Menu BuildChaosMenu()
+        {
+            Menu m = new Menu("Chaos");
+            m.Add(new InfoItem("Active", () => { string b = ChaosNames(); return b.Length == 0 ? "nothing" : b; }));
+            m.Add(new ActionItem("Stop All Chaos", () => { StopAllChaos(); Notify("Chaos stopped"); }, "Switches every mode off and cleans up"));
+
+            m.Header("Cars Come Alive");
+            m.Add(new ToggleItem("Car Magnet", () => carMagnet, v => carMagnet = v,
+                "Nearby traffic is pulled toward you and flung at you, Carmageddon style. God Mode recommended"));
+            m.Add(new ToggleItem("Car Rain", () => carRain, v => { carRain = v; if (v) PrepareCatalog(); else ReleaseRainModel(); },
+                "Random cars drop out of the sky around you. Clean up with the action below"));
+            m.Add(new ToggleItem("Jumpy Traffic", () => jumpyTraffic, v => jumpyTraffic = v, "Cars on the ground keep hopping"));
+            m.Add(new ToggleItem("Floaty Cars", () => floatyCars, v => floatyCars = v, "Cars around you float like they're on the moon"));
+            m.Add(new ToggleItem("Crazy Traffic", () => crazyTraffic, v => crazyTraffic = v, "Every half second nearby cars shoot forward or backward"));
+            m.Add(new ToggleItem("Mad Drivers", () => madDrivers, v => { madDrivers = v; N.Call("SWITCH_MAD_DRIVERS", v); }, "GTA IV's own reckless-driver mode"));
+            m.Add(new ToggleItem("Rainbow Traffic", () => rainbowTraffic, v => rainbowTraffic = v, "Nearby cars keep changing colour"));
+            m.Add(new ToggleItem("Honking Chorus", () => honkChorus, v => honkChorus = v, "Random cars around you lean on the horn"));
+            m.Add(new ToggleItem("Invisible Traffic", () => ghostTraffic, v => { ghostTraffic = v; if (!v) RestoreHiddenCars(); }, "Other cars vanish (you can still hit them)"));
+
+            m.Header("Forces of Nature");
+            m.Add(new ToggleItem("Black Hole", () => blackHole, v =>
+            {
+                blackHole = v;
+                Ped p = PlayerPed();
+                if (v && p != null) holeCenter = U.Add(U.Add(p.Position, U.Mul(U.HeadingDir(p.Heading), 35f)), U.V(0f, 0f, 10f));
+            }, "A point 35 m ahead of you sucks in cars and people"));
+            m.Add(new ToggleItem("Tornado", () => tornado, v => tornado = v, "A whirlwind circles you, lifting and spinning cars and people"));
+            m.Add(new ToggleItem("Earthquake", () => earthquake, v => earthquake = v, "Cars and people get thrown around and the controller rumbles"));
+            m.Add(new ToggleItem("Repulsor Field", () => repulsor, v => repulsor = v, "Anything that comes within 12 m of you is shoved away"));
+            m.Add(new ToggleItem("Meteor Shower", () => meteors, v => meteors = v, "Explosions rain down around you, never closer than 20 m"));
+            m.Add(new ToggleItem("Time Lapse", () => timeLapse, v => timeLapse = v, "Days fly by in a couple of minutes"));
+            m.Add(new ToggleItem("Weather Roulette", () => weatherRoulette, v => { weatherRoulette = v; if (!v) N.Call("RELEASE_WEATHER"); }, "The weather changes every few seconds"));
+
+            m.Header("People");
+            m.Add(new ToggleItem("Riot", () => riot, v => { riot = v; if (!v) EndRiot(); }, "People around you grab weapons and fight each other"));
+            m.Add(new ToggleItem("Rioters Target You Too", () => riotTargetsYou, v => riotTargetsYou = v, "Off: they only fight each other"));
+            m.Add(new ActionItem("Everyone Flees", () => ChaosOnce("flee"), "Nearby people run from you"));
+            m.Add(new ActionItem("Launch People", () => ChaosOnce("launchPeds"), "Nearby people fly up"));
+            m.Add(new ActionItem("Set People on Fire", () => ChaosOnce("ignite")));
+            m.Add(new ActionItem("Everyone Out of Their Cars", () => ChaosOnce("exit")));
+
+            m.Header("One-Shots");
+            m.Add(new ActionItem("Launch Cars Up", () => ChaosOnce("launchCars")));
+            m.Add(new ActionItem("Shockwave", () => ChaosOnce("shockwave"), "Blasts cars and people away from you"));
+            m.Add(new ActionItem("Explode Nearby Cars", () => ChaosOnce("explode"), "Every car in range except yours"));
+            m.Add(new ActionItem("Mass Breakdown", () => ChaosOnce("breakdown"), "Kills the engine of every car in range"));
+            m.Add(new ActionItem("Clean Up Rain Cars", () => { int n = ClearRainCars(true); Notify("Removed " + n + " rain car" + (n == 1 ? "" : "s")); }));
+
+            m.Header("Settings");
+            m.Add(new FloatItem("Chaos Radius", 30f, 150f, 10f, () => chaosRadius, v => chaosRadius = v, "0", " m", null, "How far around you chaos reaches"));
+            m.Add(new FloatItem("Chaos Strength", 1f, 10f, 1f, () => chaosStrength, v => chaosStrength = v, "0", "", null, "How hard things get pushed, and how often things happen"));
+            return m;
+        }
+
+        private string ChaosNames()
+        {
+            List<string> n = new List<string>();
+            if (carMagnet) n.Add("Car Magnet"); if (carRain) n.Add("Car Rain"); if (jumpyTraffic) n.Add("Jumpy");
+            if (floatyCars) n.Add("Floaty"); if (crazyTraffic) n.Add("Crazy Traffic"); if (madDrivers) n.Add("Mad Drivers");
+            if (rainbowTraffic) n.Add("Rainbow"); if (honkChorus) n.Add("Honking"); if (ghostTraffic) n.Add("Invisible");
+            if (blackHole) n.Add("Black Hole"); if (tornado) n.Add("Tornado"); if (earthquake) n.Add("Earthquake");
+            if (repulsor) n.Add("Repulsor"); if (meteors) n.Add("Meteors"); if (timeLapse) n.Add("Time Lapse");
+            if (weatherRoulette) n.Add("Weather"); if (riot) n.Add("Riot");
+            return string.Join(", ", n.ToArray());
+        }
+
+        // ---- entity selection --------------------------------------------------------
+
+        /// <summary>Nearby cars chaos may touch: never yours, never mission cars, at most MaxChaosCars.</summary>
+        private List<Vehicle> ChaosCars(Vector3 center, float radius)
+        {
+            List<Vehicle> list = new List<Vehicle>();
+            Vehicle mine = CurrentVehicle();
+            int mineH = mine != null ? H(mine) : 0;
+            foreach (Vehicle v in World.GetVehicles(center, radius))
+            {
+                if (list.Count >= MaxChaosCars) break;
+                if (v == null || !v.Exists() || (mineH != 0 && H(v) == mineH)) continue;
+                if (N.Get<bool>("IS_CAR_A_MISSION_CAR", false, v)) continue;
+                list.Add(v);
+            }
+            return list;
+        }
+
+        /// <summary>Nearby people chaos may touch: never you, never mission characters, at most MaxChaosPeds.</summary>
+        private List<Ped> ChaosPeds(Vector3 center, float radius, bool onFootOnly)
+        {
+            List<Ped> list = new List<Ped>();
+            Ped me = PlayerPed();
+            int meH = me != null ? H(me) : 0;
+            foreach (Ped p in World.GetPeds(center, radius))
+            {
+                if (list.Count >= MaxChaosPeds) break;
+                if (p == null || !p.Exists() || H(p) == meH) continue;
+                if (N.Get<bool>("IS_PED_A_MISSION_PED", false, p)) continue;
+                if (onFootOnly && N.Get<bool>("IS_CHAR_IN_ANY_CAR", false, p)) continue;
+                list.Add(p);
+            }
+            return list;
+        }
+
+        // A velocity change on a car, as ScriptHookDotNet's Vehicle.ApplyForce does it (type 3, world, scaled by mass).
+        private static void PushCar(Vehicle v, Vector3 dv)
+        {
+            N.Call("APPLY_FORCE_TO_CAR", v, 3, dv.X, dv.Y, dv.Z, 0f, 0f, 0f, 0, 0, 1, 1);
+        }
+
+        // People only fly when they're ragdolls (TORISOUP's repulsion field does ForceRagdoll, then ApplyForce).
+        private static void FlingPed(Ped p, Vector3 dv)
+        {
+            N.Call("SWITCH_PED_TO_RAGDOLL", p, 10000, 1500, false, true, true, false);   // ScriptHookDotNet's Ped.ForceRagdoll arguments
+            N.Call("APPLY_FORCE_TO_PED", p, 3, dv.X, dv.Y, dv.Z, 0f, 0f, 0f, 0, 0, 1, 1);
+        }
+
+        // ---- per-tick update -----------------------------------------------------------
+
+        private void RunChaos(Ped ped)
+        {
+            chaosBadge = AnyChaos ? "CHAOS: " + ChaosNames() : null;
+            if (paused || now < nextChaosTick) return;
+            nextChaosTick = now + ChaosTickMs;
+            // Scale pushes by how long it really was since the last tick (the mods these come from assume 100 ms).
+            float k = U.Clamp((lastChaosTick == 0 ? ChaosTickMs : now - lastChaosTick) / (float)ChaosTickMs, 0.5f, 3f);
+            lastChaosTick = now;
+            if (!AnyChaos) return;
+
+            float s = chaosStrength / 5f;   // 1.0 at the default strength
+            Vector3 me = ped.Position;
+            bool needCars = carMagnet || jumpyTraffic || floatyCars || crazyTraffic || rainbowTraffic || honkChorus || ghostTraffic || earthquake || repulsor || tornado;
+            bool needPeds = earthquake || repulsor || tornado;
+            List<Vehicle> cars = needCars ? ChaosCars(me, chaosRadius) : null;
+            List<Ped> peds = needPeds ? ChaosPeds(me, chaosRadius, true) : null;
+
+            if (carMagnet) TickMagnet(cars, me, s, k);
+            if (jumpyTraffic)
+                foreach (Vehicle v in cars)
+                    if (rng.Next(100) < 40 && N.Get<bool>("IS_VEHICLE_ON_ALL_WHEELS", false, v)) PushCar(v, U.V(0f, 0f, (0.6f + 0.6f * s) * k));
+            if (floatyCars)
+                foreach (Vehicle v in cars) PushCar(v, U.V(0f, 0f, 0.85f * k));   // gravity takes about 0.98 m/s per 100 ms
+            if (earthquake) TickEarthquake(cars, peds, s, k);
+            if (repulsor) TickRepulsor(cars, peds, me, s, k);
+            if (tornado) TickTornado(me, s, k);
+            if (blackHole) TickBlackHole(s, k);
+
+            if (crazyTraffic && now >= crazyAt)
+            {
+                crazyAt = now + 500;
+                foreach (Vehicle v in cars) N.Call("SET_CAR_FORWARD_SPEED", v, rng.Next(2) == 0 ? 30f : -30f);
+            }
+            if (rainbowTraffic && now >= rainbowAt)
+            {
+                rainbowAt = now + 400;
+                int n = 0;
+                foreach (Vehicle v in cars) { if (++n > 20) break; N.Call("CHANGE_CAR_COLOUR", v, rng.Next(0, 134), rng.Next(0, 134)); }
+            }
+            if (honkChorus && now >= honkAt && cars.Count > 0)
+            {
+                honkAt = now + 300;
+                for (int i = 0; i < 2; i++) N.Call("SOUND_CAR_HORN", cars[rng.Next(cars.Count)], rng.Next(400, 1500));
+            }
+            if (ghostTraffic)
+                foreach (Vehicle v in cars)
+                    if (!hiddenCars.ContainsKey(H(v))) { N.Call("SET_CAR_VISIBLE", v, false); hiddenCars[H(v)] = v; }
+
+            if (carRain) TickCarRain(me, s);
+            if (meteors && now >= meteorAt) { meteorAt = now + (int)(1600f / Math.Max(0.4f, s)); Meteor(me); }
+            if (timeLapse)
+            {
+                Pointer h = new Pointer(typeof(int)), mi = new Pointer(typeof(int));
+                if (N.Call("GET_TIME_OF_DAY", h, mi))
+                {
+                    int total = ((int)h * 60 + (int)mi + 4) % (24 * 60);   // 4 game minutes per 100 ms: a day in 36 s
+                    N.Call("SET_TIME_OF_DAY", total / 60, total % 60);
+                }
+            }
+            if (weatherRoulette && now >= weatherAt) { weatherAt = now + 6000; N.Call("FORCE_WEATHER_NOW", rng.Next(GameData.WeatherNames.Length)); }
+            if (riot && now >= riotAt) { riotAt = now + 1500; TickRiot(me); }
+
+            // Housekeeping every second: forget cars that are gone.
+            if (now >= chaosSlowAt)
+            {
+                chaosSlowAt = now + 1000;
+                rainCars.RemoveAll(x => x == null || !x.Exists());
+                PruneGone(hiddenCars);
+                PruneGone(rioters);
+            }
+        }
+
+        private void TickMagnet(List<Vehicle> cars, Vector3 me, float s, float k)
+        {
+            Vector3 target = U.Add(me, U.V(0f, 0f, 1.5f));
+            foreach (Vehicle v in cars)
+            {
+                Vector3 d = U.Sub(target, v.Position);
+                float dist = U.Len(d);
+                if (dist < 4f) continue;   // already on top of you
+                if (N.OutFloat("GET_CAR_SPEED", 0f, v) > 32f) continue;   // fast enough already
+                Vector3 dir = U.Mul(d, 1f / dist);
+                // Pull toward you, with a little lift so far-away cars arc in instead of scraping along.
+                PushCar(v, U.Mul(U.Add(U.Mul(dir, 2.2f * s), U.V(0f, 0f, dist > 20f ? 0.7f : 0.15f)), k));
+            }
+        }
+
+        private void TickEarthquake(List<Vehicle> cars, List<Ped> peds, float s, float k)
+        {
+            foreach (Vehicle v in cars)
+                if (rng.Next(100) < 35) PushCar(v, U.V(((float)rng.NextDouble() - 0.5f) * 1.6f * s * k, ((float)rng.NextDouble() - 0.5f) * 1.6f * s * k, (float)rng.NextDouble() * 1.8f * s * k));
+            foreach (Ped p in peds)
+                if (rng.Next(100) < 4) FlingPed(p, U.V(((float)rng.NextDouble() - 0.5f) * 3f, ((float)rng.NextDouble() - 0.5f) * 3f, 2f));   // people stumble now and then
+            if (now >= rumbleAt) { rumbleAt = now + 250; N.Call("SHAKE_PAD", 0, 300, (int)(60 + 15 * chaosStrength)); }
+        }
+
+        private void TickRepulsor(List<Vehicle> cars, List<Ped> peds, Vector3 me, float s, float k)
+        {
+            const float range = 12f;
+            foreach (Vehicle v in cars)
+            {
+                Vector3 d = U.Sub(v.Position, me);
+                float dist = U.Len(d);
+                if (dist > range || dist < 0.1f) continue;
+                PushCar(v, U.Mul(U.Add(U.Mul(d, 3f * s / dist), U.V(0f, 0f, 0.4f)), k));   // Parupunte's repulsion pushes 3 per tick
+            }
+            foreach (Ped p in peds)
+            {
+                Vector3 d = U.Sub(p.Position, me);
+                float dist = U.Len(d);
+                if (dist > range || dist < 0.1f) continue;
+                FlingPed(p, U.Mul(U.Add(U.Mul(d, 3f * s / dist), U.V(0f, 0f, 1f)), k));
+            }
+        }
+
+        private void TickTornado(Vector3 me, float s, float k)
+        {
+            // The funnel circles you at 30 m, about one lap every 40 seconds.
+            tornadoAngle += 0.016f * k;
+            Vector3 c = U.Add(me, U.V((float)Math.Cos(tornadoAngle) * 30f, (float)Math.Sin(tornadoAngle) * 30f, 0f));
+            const float reach = 22f;
+            foreach (Vehicle v in ChaosCars(c, reach)) Swirl(v, null, c, me.Z, s, k, reach);
+            foreach (Ped p in ChaosPeds(c, reach, true)) Swirl(null, p, c, me.Z, s, k, reach);
+        }
+
+        private void Swirl(Vehicle v, Ped p, Vector3 c, float groundZ, float s, float k, float reach)
+        {
+            Vector3 pos = v != null ? v.Position : p.Position;
+            Vector3 flat = U.V(c.X - pos.X, c.Y - pos.Y, 0f);
+            float dist = U.Len(flat);
+            if (dist > reach) return;
+            Vector3 inward = dist > 0.5f ? U.Mul(flat, 1f / dist) : new Vector3();
+            Vector3 around = U.V(-inward.Y, inward.X, 0f);   // counter-clockwise
+            float lift = pos.Z - groundZ < 28f ? 1.25f : 0.6f;   // rise, then get flung out near the top
+            Vector3 dv = U.Mul(U.Add(U.Add(U.Mul(around, 1.6f * s), U.Mul(inward, 0.6f * s)), U.V(0f, 0f, lift)), k);
+            if (v != null) PushCar(v, dv); else FlingPed(p, U.Mul(dv, 0.6f));
+        }
+
+        private void TickBlackHole(float s, float k)
+        {
+            float reach = chaosRadius * 1.3f;
+            foreach (Vehicle v in ChaosCars(holeCenter, reach)) Suck(v, null, s, k);
+            foreach (Ped p in ChaosPeds(holeCenter, reach, true)) Suck(null, p, s, k);
+        }
+
+        private void Suck(Vehicle v, Ped p, float s, float k)
+        {
+            Vector3 d = U.Sub(holeCenter, v != null ? v.Position : p.Position);
+            float dist = U.Len(d);
+            if (dist < 0.5f) return;
+            Vector3 dir = U.Mul(d, 1f / dist);
+            // Stronger close in, a slight swirl so things orbit, and lift to cancel gravity near the core.
+            float pull = Math.Min(4f, (0.9f + 25f / Math.Max(dist, 6f)) * s);
+            Vector3 dv = U.Add(U.Add(U.Mul(dir, pull), U.Mul(U.V(-dir.Y, dir.X, 0f), 0.5f * s)), U.V(0f, 0f, dist < 25f ? 0.9f : 0.4f));
+            if (v != null) PushCar(v, U.Mul(dv, k)); else FlingPed(p, U.Mul(dv, 0.6f * k));
+        }
+
+        private void Meteor(Vector3 me)
+        {
+            double a = rng.NextDouble() * Math.PI * 2;
+            float r = 20f + (float)rng.NextDouble() * Math.Max(1f, chaosRadius - 20f);
+            float x = me.X + (float)Math.Cos(a) * r, y = me.Y + (float)Math.Sin(a) * r, z = me.Z;
+            Pointer gz = new Pointer(typeof(float));
+            if (N.Call("GET_GROUND_Z_FOR_3D_COORD", x, y, me.Z + 50f, gz)) { float g = (float)gz; if (g > 0.5f && Math.Abs(g - me.Z) < 40f) z = g; }
+            // ADD_EXPLOSION(x, y, z, type (0 grenade, 1 molotov, 2 rocket), radius, sound, no visuals, camera shake)
+            N.Call("ADD_EXPLOSION", x, y, z, rng.Next(4) == 0 ? 1 : 2, 5.0f, true, false, 0.3f);
+        }
+
+        // ---- car rain: model loading never blocks the game ---------------------------
+
+        private void TickCarRain(Vector3 me, float s)
+        {
+            if (now < nextRainSpawn) return;
+            if (rainModel == 0)
+            {
+                string pick = RandomRainModel();
+                if (pick == null) { nextRainSpawn = now + 2000; return; }
+                rainModel = Hash(pick);
+                rainRequestedAt = now;
+                N.Call("REQUEST_MODEL", rainModel);
+                return;
+            }
+            if (!N.Get<bool>("HAS_MODEL_LOADED", false, rainModel))
+            {
+                if (now - rainRequestedAt > 4000) ReleaseRainModel();   // try another model
+                return;
+            }
+            double a = rng.NextDouble() * Math.PI * 2;
+            float r = 12f + (float)rng.NextDouble() * Math.Max(1f, chaosRadius * 0.6f - 12f);
+            Vector3 pos = U.V(me.X + (float)Math.Cos(a) * r, me.Y + (float)Math.Sin(a) * r, me.Z + 35f + (float)rng.NextDouble() * 25f);
+            Vehicle car = World.CreateVehicle(new Model(rainModel), pos);
+            ReleaseRainModel();
+            nextRainSpawn = now + (int)(1500f / Math.Max(0.4f, s));
+            if (car == null || !car.Exists()) return;
+            car.Heading = (float)(rng.NextDouble() * 360.0);
+            rainCars.Add(car);
+            while (rainCars.Count > MaxRainCars)
+            {
+                Vehicle old = rainCars[0];
+                rainCars.RemoveAt(0);
+                if (old != null && old.Exists() && !PlayerIsIn(old)) old.Delete();
+            }
+        }
+
+        private string RandomRainModel()
+        {
+            List<string> ok = new List<string>();
+            foreach (string[] cls in GameData.VehicleClasses)
+                for (int i = 1; i < cls.Length; i++)
+                    if (IsAvailable(cls[i])) ok.Add(cls[i]);
+            return ok.Count == 0 ? null : ok[rng.Next(ok.Count)];
+        }
+
+        private void ReleaseRainModel()
+        {
+            if (rainModel != 0) N.Call("MARK_MODEL_AS_NO_LONGER_NEEDED", rainModel);
+            rainModel = 0;
+        }
+
+        private bool PlayerIsIn(Vehicle v)
+        {
+            Ped p = PlayerPed();
+            return p != null && N.Get<bool>("IS_CHAR_IN_CAR", false, p, v);
+        }
+
+        /// <summary>Delete rain cars (or with delete = false, hand them back to the game). Returns how many.</summary>
+        private int ClearRainCars(bool delete)
+        {
+            int n = 0;
+            foreach (Vehicle v in rainCars.ToArray())
+            {
+                if (v == null || !v.Exists()) continue;
+                if (delete && !PlayerIsIn(v)) v.Delete(); else v.NoLongerNeeded();
+                n++;
+            }
+            rainCars.Clear();
+            return n;
+        }
+
+        // ---- riot: per-person relationships, so it can be undone exactly -------------
+
+        private void TickRiot(Vector3 me)
+        {
+            int added = 0;
+            foreach (Ped p in ChaosPeds(me, Math.Min(chaosRadius, 60f), false))
+            {
+                if (added >= 8) break;
+                if (rioters.ContainsKey(H(p)) || N.Get<bool>("IS_CHAR_DEAD", true, p)) continue;
+                int w = RiotWeapons[rng.Next(RiotWeapons.Length)];
+                N.Call("GIVE_WEAPON_TO_CHAR", p, w, 300, false);
+                N.Call("SET_CURRENT_CHAR_WEAPON", p, w, true);
+                foreach (int g in RiotGroups) N.Call("SET_CHAR_RELATIONSHIP", p, 5, g);   // 5 = hate
+                if (riotTargetsYou) N.Call("SET_CHAR_RELATIONSHIP", p, 5, 0);
+                N.Call("TASK_COMBAT_HATED_TARGETS_AROUND_CHAR", p, 40.0f);
+                N.Call("SET_CHAR_KEEP_TASK", p, true);
+                rioters[H(p)] = p;
+                added++;
+            }
+        }
+
+        private void EndRiot()
+        {
+            foreach (Ped p in rioters.Values)
+            {
+                if (p == null || !p.Exists()) continue;
+                foreach (int g in RiotGroups) N.Call("CLEAR_CHAR_RELATIONSHIP", p, 5, g);
+                N.Call("CLEAR_CHAR_RELATIONSHIP", p, 5, 0);
+                N.Call("SET_CHAR_KEEP_TASK", p, false);
+            }
+            rioters.Clear();
+        }
+
+        private void RestoreHiddenCars()
+        {
+            foreach (Vehicle v in hiddenCars.Values) if (v != null && v.Exists()) N.Call("SET_CAR_VISIBLE", v, true);
+            hiddenCars.Clear();
+        }
+
+        private static void PruneGone<T>(Dictionary<int, T> map) where T : GTA.@base.HandleObject
+        {
+            List<int> gone = new List<int>();
+            foreach (KeyValuePair<int, T> kv in map) if (kv.Value == null || !kv.Value.Exists()) gone.Add(kv.Key);
+            foreach (int h in gone) map.Remove(h);
+        }
+
+        // ---- one-shots ------------------------------------------------------------------
+
+        private void ChaosOnce(string what)
+        {
+            Ped ped = PlayerPed(); if (ped == null) return;
+            Vector3 me = ped.Position;
+            float s = chaosStrength / 5f;
+            int n = 0;
+            switch (what)
+            {
+                case "launchCars":
+                    foreach (Vehicle v in ChaosCars(me, chaosRadius)) { PushCar(v, U.V(0f, 0f, 10f + 8f * s)); n++; }
+                    Notify(n + " cars launched"); break;
+                case "shockwave":
+                    foreach (Vehicle v in ChaosCars(me, Math.Min(chaosRadius, 50f)))
+                    {
+                        Vector3 d = U.Sub(v.Position, me); float dist = Math.Max(1f, U.Len(d));
+                        PushCar(v, U.Add(U.Mul(d, (14f * s) / dist * Math.Max(0.3f, 1f - dist / 50f)), U.V(0f, 0f, 4f * s))); n++;
+                    }
+                    foreach (Ped p in ChaosPeds(me, Math.Min(chaosRadius, 50f), true))
+                    {
+                        Vector3 d = U.Sub(p.Position, me); float dist = Math.Max(1f, U.Len(d));
+                        FlingPed(p, U.Add(U.Mul(d, (12f * s) / dist), U.V(0f, 0f, 5f * s))); n++;
+                    }
+                    Notify("Shockwave hit " + n + " things"); break;
+                case "explode":
+                    foreach (Vehicle v in ChaosCars(me, chaosRadius)) { N.Call("EXPLODE_CAR", v, true, false); n++; }
+                    Notify(n + " cars exploded"); break;
+                case "breakdown":
+                    foreach (Vehicle v in ChaosCars(me, chaosRadius)) { N.Call("SET_ENGINE_HEALTH", v, 0f); n++; }
+                    Notify(n + " engines killed"); break;
+                case "launchPeds":
+                    foreach (Ped p in ChaosPeds(me, chaosRadius, true)) { FlingPed(p, U.V(0f, 0f, 14f + 6f * s)); n++; }
+                    Notify(n + " people launched"); break;
+                case "ignite":
+                    foreach (Ped p in ChaosPeds(me, Math.Min(chaosRadius, 50f), false)) { if (n >= 15) break; N.Call("START_CHAR_FIRE", p); n++; }
+                    Notify(n + " people set on fire"); break;
+                case "flee":
+                    foreach (Ped p in ChaosPeds(me, chaosRadius, false)) { N.Call("TASK_SMART_FLEE_CHAR", p, ped, 100.0f, 20000); n++; }
+                    Notify(n + " people running"); break;
+                case "exit":
+                    foreach (Vehicle v in ChaosCars(me, chaosRadius)) { N.Call("TASK_EVERYONE_LEAVE_CAR", v); n++; }
+                    Notify("Everyone out of " + n + " cars"); break;
+            }
+        }
+
+        private void StopAllChaos()
+        {
+            carMagnet = jumpyTraffic = floatyCars = crazyTraffic = rainbowTraffic = honkChorus = false;
+            blackHole = tornado = earthquake = repulsor = meteors = timeLapse = false;
+            if (carRain) { carRain = false; ReleaseRainModel(); }
+            ClearRainCars(false);   // keep them, but let the game clean them up
+            if (madDrivers) { madDrivers = false; N.Call("SWITCH_MAD_DRIVERS", false); }
+            if (ghostTraffic) { ghostTraffic = false; RestoreHiddenCars(); }
+            if (weatherRoulette) { weatherRoulette = false; N.Call("RELEASE_WEATHER"); }
+            if (riot) { riot = false; EndRiot(); }
+            chaosBadge = null;
         }
     }
 

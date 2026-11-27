@@ -86,6 +86,7 @@ namespace GTA
         public int Health { get; set; }
         public void Repair() { }
         public void Delete() { }
+        public void NoLongerNeeded() { }   // Vehicle.h: virtual void NoLongerNeeded() (MARK_CAR_AS_NO_LONGER_NEEDED)
     }
 
     // Blip.h

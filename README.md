@@ -4,7 +4,7 @@ ClaudeMenu is a trainer for GTA IV that you drive completely from a gamepad: ope
 
 It reads the controller directly through XInput instead of the game's key bindings. Under Proton, Steam Input shows the Deck's controls to the game as an Xbox 360 pad, so button combos work the same whatever the in-game control settings are.
 
-**Status (1.2.0):** 1.1.6 was tested on a real Steam Deck (SteamOS, Proton 8.0-103, GTA IV 1.0.8.0, ScriptHook 0.5.1, ScriptHookDotNet 1.7.2.0 BETA): the menu loads, draws and responds to the controller, and walking is normal. 1.2.0 brings back **Super Run** and **Super Jump** and reworks the **car multipliers**, both using the techniques working GTA IV trainers use (see [Credits](#credits-and-references)). It also makes the menu translucent and keeps the camera usable while the menu is open. **None of the 1.2.0 changes have been tested on the Deck yet.** They're all off by default, and **Live Debug** (Misc or Performance) shows what they see each frame. If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
+**Status (1.3.0):** 1.1.6 was tested on a real Steam Deck (SteamOS, Proton 8.0-103, GTA IV 1.0.8.0, ScriptHook 0.5.1, ScriptHookDotNet 1.7.2.0 BETA): the menu loads, draws and responds to the controller, and walking is normal. 1.2.0 brought back **Super Run** and **Super Jump**, reworked the **car multipliers**, made the menu translucent and kept the camera usable while the menu is open. 1.3.0 adds a **Chaos** section with world-changing modes, headed by a Carmageddon-style **Car Magnet**. All of this uses techniques from working GTA IV mods (see [Credits](#credits-and-references)). **None of the 1.2.0 or 1.3.0 changes have been tested on the Deck yet.** They're all off by default, and **Live Debug** (Misc or Performance) shows what the movement features see each frame. If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
 
 ## Controls
 
@@ -37,6 +37,12 @@ You can rebind the open, close and nitro buttons in-game under **Settings**: cho
   - **Quick actions:** repair, wash, flip upright, vehicle god mode, auto repair, delete.
 - **Weapons:** give all (for the episode you're playing), give one weapon, infinite ammo, no reload, fast reload, refill, explosive hits, remove all
 - **World:** hour and minute, freeze time, weather, traffic / pedestrian / parked car density, clear area (everything, vehicles, peds or police), game speed (slow motion), gravity on/off, unlock all islands
+- **Chaos** (all off by default; see [How Chaos works](#how-chaos-works)):
+  - **Cars come alive:** **Car Magnet** (nearby traffic is pulled toward you and flung at you, like GTA V's Carmageddon mod), **Car Rain** (random cars drop from the sky), Jumpy Traffic, Floaty Cars, Crazy Traffic, Mad Drivers, Rainbow Traffic, Honking Chorus, Invisible Traffic
+  - **Forces of nature:** Black Hole, Tornado, Earthquake (with controller rumble), Repulsor Field, Meteor Shower, Time Lapse, Weather Roulette
+  - **People:** Riot (people arm themselves and fight; optionally you too), Everyone Flees, Launch People, Set People on Fire, Everyone Out of Their Cars
+  - **One-shots:** Launch Cars Up, Shockwave, Explode Nearby Cars, Mass Breakdown, Clean Up Rain Cars
+  - **Stop All Chaos**, plus Chaos Radius (30–150 m) and Chaos Strength (1–10). A red **CHAOS** badge at the top of the screen lists what's running.
 - **Teleport:** map waypoint (finds the ground), forward and up nudges, 29 Liberty City landmarks across Algonquin, Broker & Dukes, Bohan and Alderney, 6 save/load slots and your own named locations from the INI
 - **Misc:** hide HUD and radar, hide radar only, coordinates, FPS counter, **Live Debug**, free camera (fly with the sticks, A teleports you there), speedometer and units
 - **Settings:** rebind open/close/nitro, set the sprint and jump buttons, freeze-while-open, camera moves while open, stick navigation, keyboard fallback, menu position (left/center/right), 6 colour themes, menu size, rows shown, **menu opacity**, save when the menu closes, controller status
@@ -79,6 +85,19 @@ Deck tests showed `SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER` and on-ground `SET_CHAR_
 - **Super Jump:** an upward push for up to 0.6 s after you press jump (X), while you keep holding it. **Jump Boost** 1–10 (5 is XMC's value). You're invincible from take-off until a moment after you land, so the fall doesn't hurt.
 
 Both are off by default and do nothing unless you hold the button. Neither does anything while the menu is open or while you're holding LB+RB (the menu combo). Each sprint and jump is logged, like `Super run: top speed 11.2 m/s (normal sprint is about 7)` and `Super jump: rose 4.5 m (a normal jump is about 1)`. That shows whether the push works on your setup.
+
+### How Chaos works
+
+Chaos borrows ideas and force sizes from two GTA IV chaos mods with public source. **ChaosIV** contributed Jumpy Vehicles, Earthquake, launches, coloured traffic, flee, everyone out and mass breakdown. **TORISOUP's Inferno "Parupunte"** contributed the repulsion field (ragdoll a person, then push), Crazy City (car speeds of ±30 every half second) and floaty cars. Both run on a 100 ms tick, and so does ClaudeMenu's Chaos. Car Magnet is ClaudeMenu's take on GTA V's Carmageddon mod: every car in range is pulled toward you, with a little lift so distant cars arc in.
+
+- **It never touches you or your vehicle.** Cars thrown at you can of course still hit you, so God Mode helps with Car Magnet.
+- **It skips mission characters and vehicles** (`IS_PED_A_MISSION_PED` / `IS_CAR_A_MISSION_CAR`), so story missions keep their cars and people. Cars created by scripts usually count as mission cars in GTA IV, so cars ClaudeMenu spawns for you are probably left alone too.
+- At most 40 cars and 30 people are affected per tick, within **Chaos Radius** of you. Black Hole's centre stays where you put it, 35 m ahead of you when you switch it on.
+- **Car Rain** loads models without freezing the game and keeps at most 20 rain cars, deleting the oldest. **Clean Up Rain Cars** removes them all.
+- **Riot** changes each rioter's own relationships (`SET_CHAR_RELATIONSHIP`), so switching it off undoes exactly that (`CLEAR_CHAR_RELATIONSHIP`). Invisible Traffic shows the cars again, Weather Roulette hands the weather back to the game, and Mad Drivers switches off.
+- **Stop All Chaos** does all of the above at once.
+
+Heavy combinations (Car Rain + Meteors + Riot at full strength) can push GTA IV hard on a Deck. Lower Chaos Strength or Radius if the frame rate drops.
 
 ### What GTA IV can't do (so ClaudeMenu doesn't pretend to)
 
@@ -260,6 +279,8 @@ These are the problems we hit on a real Deck, in the order we hit them.
 - **The car stops or won't pull away with a multiplier on.** Set **Boost Method** to Pulses or Force and tell us what Live Debug showed. Reset to Stock always gives you the normal car back.
 - **Nitro does nothing.** It's off by default: turn on Performance → Nitro. It also needs you driving a car or bike that's moving forward, with the nitro button (L3 by default) held. Rebind it under **Settings → Rebind Nitro Button**.
 - **Super Run / Super Jump do nothing.** Turn on **Live Debug** and check the FOOT line. `run btn` and `jump btn` should say Y while you hold sprint (A) and jump (X). If they don't, set your buttons under **Settings → Set Sprint Button / Set Jump Button**. If they do and it shows `run push` / `jump push` but nothing happens, raise **Run Boost / Jump Boost**. The log records each attempt (`Super run: top speed …`, `Super jump: rose … m`).
+- **Chaos is too much, or the frame rate drops.** Chaos → **Stop All Chaos** switches everything off. Then lower **Chaos Radius** / **Chaos Strength** before turning modes back on. The red CHAOS badge at the top of the screen shows what's still running.
+- **Rain cars are piling up.** Chaos → **Clean Up Rain Cars**.
 - **Walking feels wrong.** Turn Super Run off. With it off ClaudeMenu doesn't touch your movement at all, and if walking is still odd, send the log.
 - **Free camera says it isn't working.** The camera couldn't be created in your setup; the log has the details. Everything else keeps working.
 - **The text sits a bit off in its rows.** Change **Settings → Menu Size**.
@@ -299,7 +320,7 @@ These rules come from getting the script running on a real Deck. Please keep the
 ClaudeMenu borrows *techniques*, not code, from GTA IV mods whose source is public. Thanks to their authors:
 
 - **XMC mod menu** (EmmanuelU/xmc-mod-menu): super run and super jump with `APPLY_FORCE_TO_PED` while a button is held, the per-frame `SET_CAR_FORWARD_SPEED(speed × 1.02)` "NFS mode", and `SET_CAMERA_CONTROLS_DISABLED_WITH_PLAYER_CONTROLS` to keep the camera while the player is frozen.
-- **ChaosIV** (bountifulellie/ChaosIV) and **TORISOUP's GTA4 Inferno scripts**: how much force it takes to move peds and cars in IV, re-applying a ped's velocity over several ticks, and using collision proofing for falls.
+- **ChaosIV** (bountifulellie/ChaosIV) and **TORISOUP's GTA4 Inferno scripts** ("Parupunte"): how much force it takes to move peds and cars in IV, re-applying a ped's velocity over several ticks, collision proofing for falls, and most of the Chaos ideas: jumpy, floaty and crazy traffic, earthquake, repulsion, launches, flee, coloured traffic, mass breakdown. **GTA V's Carmageddon mod** inspired Car Magnet.
 - **LotsofEds' IV mods** (MoveImproveIV-SDK, IVMouseWheelThrottle): per-frame forces on the player's car, and reading forward speed from `GET_CAR_SPEED_VECTOR(…, true)`.
 - **Rockstar's decompiled mission scripts** (0x52617665/GTAIVMissionScripts): how the game itself calls `APPLY_FORCE_TO_CAR` and `GET_CAR_SPEED_VECTOR`.
 - **HappinessMP's native docs** (HappinessMP/natives): the real argument names of `APPLY_FORCE_TO_CAR` / `APPLY_FORCE_TO_PED` (force, offset, component, local force, local offset, scale by mass).
