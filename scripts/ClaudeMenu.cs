@@ -1270,7 +1270,7 @@ namespace ClaudeMenu
 
     public partial class MenuScript : Script
     {
-        private const string Version = "1.4.0";
+        private const string Version = "1.4.1";
 
         private readonly Config cfg = new Config();
         private readonly InputState input = new InputState();
@@ -2068,21 +2068,51 @@ namespace ClaudeMenu
         private bool godMode, neverWanted, policeIgnore, everyoneIgnore, infSprint;
         private bool noRagdoll, noBikeFall, noDragOut, seatbelt, autoHeal, autoArmour;
 
-        // Super Run / Super Jump, done the way the XMC trainer does them: a small
-        // APPLY_FORCE_TO_PED push every frame while the button is held. (Deck tests
-        // showed SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER and on-ground SET_CHAR_VELOCITY
-        // freeze walking, and a single in-air velocity write is ignored, so neither
-        // is used.) Both are off by default and only push while you hold the button.
+        // Super Run / Super Jump. What moves the player in GTA IV on PC isn't
+        // documented, and Deck tests ruled out several things:
+        // SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER and on-ground SET_CHAR_VELOCITY froze
+        // walking, a single in-air SET_CHAR_VELOCITY was ignored, and XMC's small
+        // per-frame APPLY_FORCE_TO_PED did nothing in the 1.4 test. So each has
+        // three methods to choose from:
+        //  Run   Step (default)  small position steps (SET_CHAR_COORDINATES_NO_OFFSET)
+        //                        along the way you're running, only while the game
+        //                        itself has you moving faster than 2.5 m/s, so walls
+        //                        stop it. Teleports demonstrably work on the Deck.
+        //        Anim Speed      SET_CHAR_ALL_ANIMS_SPEED while sprinting (the XMC trainer
+        //                        sets it on the player for rapid fire); set on start and stop only.
+        //        Push            XMC's APPLY_FORCE_TO_PED every frame.
+        //  Jump  Lift (default)  raise the player with SET_CHAR_COORDINATES_NO_OFFSET for
+        //                        a moment after the jump (the idea comes from MoveImprove's
+        //                        climb-up code), then one velocity write at the top.
+        //        Launch          SET_CHAR_VELOCITY upwards, re-applied while rising
+        //                        (TORISOUP's "let's fly" effect), at the speed that
+        //                        coasts to the chosen height.
+        //        Push            XMC's APPLY_FORCE_TO_PED for 0.6 s.
+        // A tap on jump is enough, and tapping sprint counts as sprinting.
         private bool superRun, superJump;
-        private float runBoost = 5f, jumpBoost = 5f;   // XMC uses 5 for both
-        private const int JumpBoostMs = 600;           // how long a jump keeps pushing (while held)
-        private int jumpUntil;
+        private float runBoost = 5f, jumpBoost = 5f;
+        private int runMethod, jumpMethod;             // 0 = Step / Lift (defaults)
+        private static readonly string[] RunMethodNames = { "Step", "Anim Speed", "Push" };
+        private static readonly string[] JumpMethodNames = { "Lift", "Launch", "Push" };
+        private const float LiftSpeed = 14f;           // m/s while Lift raises you
+        private const float JumpDrift = 6f;            // m/s forward during a Lift jump when you push the stick
+        private const float Gravity = 9.8f;            // m/s/s, for the Launch climb rate and Lift's fall allowance
+        private const float MinRunSpeed = 2.5f;        // the game must have you moving at least this fast for Step
+
+        // Run state
+        private int lastRunHeld = -100000;
+        private bool runActive, animBoosted;
+        private int runStartAt;
+        private Vector3 runStartPos;
+        private bool runWhyLogged;
+
+        // Jump state
+        private bool jumpActive, jumpRising;
+        private int jumpStartAt, jumpBlockedFrames;
+        private float jumpStartZ, jumpPeakZ, jumpLastSetZ;
         private bool jumpInvincible;                   // we made the player invincible for the landing
         private int lastAirborne;
-        private float jumpStartZ, jumpPeakZ;
-        private bool jumpTracking;
-        private float runPeak;
-        private int abilityLogLeft = 6;
+        private int abilityLogLeft = 8;
 
         private static readonly int[] CashAmounts = { 1000, 10000, 100000, 1000000, 10000000 };
         private static readonly string[] CashNames = { "$1,000", "$10,000", "$100,000", "$1,000,000", "$10,000,000" };
@@ -2090,7 +2120,7 @@ namespace ClaudeMenu
         private Menu BuildPlayerMenu()
         {
             Menu m = new Menu("Player");
-            m.OnEnter = menu => { abilityLogLeft = 6; };
+            m.OnEnter = menu => { abilityLogLeft = 8; runWhyLogged = false; };
             m.Header("Health");
             m.Add(new ToggleItem("God Mode", () => godMode, v =>
             {
@@ -2122,11 +2152,15 @@ namespace ClaudeMenu
 
             m.Header("Abilities");
             m.Add(new ToggleItem("Super Run (experimental)", () => superRun, v => superRun = v,
-                "Hold " + Btn.ToText(cfg.RunButton) + " (sprint) while moving to run faster. Pushes like the XMC trainer; untested on the Deck"));
-            m.Add(new FloatItem("Run Boost", 1f, 10f, 1f, () => runBoost, v => runBoost = v, "0", "", null, "How hard Super Run pushes (5 = XMC's value)"));
+                "Sprint (" + Btn.ToText(cfg.RunButton) + ") while moving to run faster. If it does nothing or stutters, try another Run Method"));
+            m.Add(new FloatItem("Run Boost", 1f, 10f, 1f, () => runBoost, v => runBoost = v, "0", "", null, "Step: this many m/s extra. Anim Speed: up to 2.5x"));
+            m.Add(new ListItem("Run Method", RunMethodNames, () => runMethod, v => { StopRunBoost(PlayerPed()); runMethod = v; }, true,
+                "Step: small position steps (default). Anim Speed: faster animations. Push: physics push (XMC)"));
             m.Add(new ToggleItem("Super Jump (experimental)", () => superJump, SetSuperJump,
-                "Hold " + Btn.ToText(cfg.JumpButton) + " (jump) to go higher. You're invincible until you land. Untested on the Deck"));
-            m.Add(new FloatItem("Jump Boost", 1f, 10f, 1f, () => jumpBoost, v => jumpBoost = v, "0", "", null, "How hard Super Jump pushes (5 = XMC's value)"));
+                "Just tap jump (" + Btn.ToText(cfg.JumpButton) + "). You're invincible until you land. If it does nothing, try another Jump Method"));
+            m.Add(new FloatItem("Jump Boost", 1f, 10f, 1f, () => jumpBoost, v => jumpBoost = v, "0", "", null, "How high: about 1.2 m per point (5 = 6 m)"));
+            m.Add(new ListItem("Jump Method", JumpMethodNames, () => jumpMethod, v => jumpMethod = v, true,
+                "Lift: raises you (default). Launch: velocity kick (TORISOUP). Push: physics push (XMC)"));
             m.Add(new ToggleItem("Unlimited Sprint", () => infSprint, v => { infSprint = v; N.Call("SET_PLAYER_NEVER_GETS_TIRED", pi, v); }));
             m.Add(new ToggleItem("No Ragdoll", () => noRagdoll, v =>
             {
@@ -2223,7 +2257,7 @@ namespace ClaudeMenu
         private void SetSuperJump(bool v)
         {
             superJump = v;
-            if (!v) EndJumpInvincibility(PlayerPed());
+            if (!v) { jumpActive = false; EndJumpInvincibility(PlayerPed()); }
         }
 
         private void EndJumpInvincibility(Ped ped)
@@ -2233,11 +2267,37 @@ namespace ClaudeMenu
             if (ped != null && !godMode) N.Call("SET_CHAR_INVINCIBLE", ped, false);
         }
 
+        /// <summary>The player's position straight from the game (GET_CHAR_COORDINATES).</summary>
+        private static Vector3 CharPos(Ped ped)
+        {
+            Pointer x = new Pointer(typeof(float)), y = new Pointer(typeof(float)), z = new Pointer(typeof(float));
+            return N.Call("GET_CHAR_COORDINATES", ped, x, y, z) ? U.V((float)x, (float)y, (float)z) : ped.Position;
+        }
+
+        /// <summary>Flat direction the player is moving in (from the game's velocity), or facing if standing.</summary>
+        private static Vector3 MoveDir(Ped ped)
+        {
+            Pointer vx = new Pointer(typeof(float)), vy = new Pointer(typeof(float)), vz = new Pointer(typeof(float));
+            if (N.Call("GET_CHAR_VELOCITY", ped, vx, vy, vz))
+            {
+                Vector3 v = U.V((float)vx, (float)vy, 0f);
+                if (U.Len(v) > 0.5f) return U.Norm(v);
+            }
+            return U.HeadingDir(ped.Heading);
+        }
+
+        private void StopRunBoost(Ped ped)
+        {
+            if (animBoosted && ped != null) N.Call("SET_CHAR_ALL_ANIMS_SPEED", ped, 1.0f);
+            animBoosted = false;
+        }
+
         private void RunPlayerFrame(Ped ped)
         {
             if (neverWanted) N.Call("CLEAR_WANTED_LEVEL", pi);
 
             footDebug = null;
+            if (!superRun && animBoosted) StopRunBoost(ped);
             if (!superRun && !superJump && !jumpInvincible && !liveDebug) return;
 
             bool blocked = open || freecamOn || paused;
@@ -2248,67 +2308,184 @@ namespace ClaudeMenu
             float stick = Math.Min(1f, (float)Math.Sqrt(sx * sx + sy * sy));
             if (!input.Connected && cfg.KeyboardFallback && (Keyboard.IsDown(0x57) || Keyboard.IsDown(0x41) || Keyboard.IsDown(0x53) || Keyboard.IsDown(0x44))) stick = 1f;   // WASD
             bool runHeld = !blocked && !menuChord && input.ComboHeld(cfg.RunButton);
-            bool jumpHeld = !blocked && !menuChord && input.ComboHeld(cfg.JumpButton);
+            if (runHeld) lastRunHeld = now;
+            bool sprinting = !blocked && now - lastRunHeld < 450;   // tapping sprint counts too
             bool jumpPressed = !blocked && !menuChord && (Btn.Count(cfg.JumpButton) == 1 ? input.Pressed(cfg.JumpButton) : input.ComboPressed(cfg.JumpButton));
-            // A push per 30 fps frame (XMC's numbers were made at 30 fps), scaled to this frame.
-            float f30 = U.Clamp(realDt * 30f, 0.25f, 3f);
+            float gameSpeed = (superRun || liveDebug) ? N.OutFloat("GET_CHAR_SPEED", 0f, ped) : 0f;
             string act = null;
 
-            // Super run: push forward (the ped's own Y axis) every frame while sprinting.
-            if (superRun && onFoot && !inAir && runHeld && stick > 0.3f)
+            // ---- Super Run -----------------------------------------------------------
+            bool canRun = superRun && onFoot && !inAir && sprinting && stick > 0.3f;
+            if (canRun && !runActive) { runActive = true; runStartAt = now; runStartPos = CharPos(ped); }
+            if (canRun)
             {
-                float force = runBoost * f30;
-                // APPLY_FORCE_TO_PED(ped, type 1, x, y, z, offset x/y/z, component 1, local force, local offset, scale by mass): XMC's arguments.
-                N.Call("APPLY_FORCE_TO_PED", ped, 1, 0f, force, 0f, 0f, 0f, 0f, 1, 1, 1, 1);
-                act = "run push " + U.F(force, "0.0");
-                runPeak = Math.Max(runPeak, N.OutFloat("GET_CHAR_SPEED", 0f, ped));
+                if (runMethod == 0)
+                {
+                    if (gameSpeed > MinRunSpeed)
+                    {
+                        // A small step along the way you're already running; the animation keeps playing.
+                        float step = runBoost * realDt;
+                        Vector3 d = MoveDir(ped), p = CharPos(ped);
+                        N.Call("SET_CHAR_COORDINATES_NO_OFFSET", ped, p.X + d.X * step, p.Y + d.Y * step, p.Z);
+                        act = "run step " + U.F(step, "0.00") + " m";
+                    }
+                    else
+                    {
+                        act = "run: game speed " + U.F(gameSpeed, "0.0") + " (blocked?)";
+                        if (!runWhyLogged && now - runStartAt > 1000)
+                        {
+                            runWhyLogged = true;
+                            Log.Write("Super run [step]: the game has you at " + U.F(gameSpeed, "0.0") + " m/s, so no steps (blocked, or not really running?)");
+                        }
+                    }
+                }
+                else if (runMethod == 1)
+                {
+                    if (!animBoosted) { N.Call("SET_CHAR_ALL_ANIMS_SPEED", ped, 1f + 0.15f * runBoost); animBoosted = true; }
+                    act = "run anims x" + U.F(1f + 0.15f * runBoost, "0.00");
+                }
+                else
+                {
+                    float force = runBoost * U.Clamp(realDt * 30f, 0.25f, 3f);
+                    // APPLY_FORCE_TO_PED(ped, type 1, x, y, z, offset x/y/z, component 1, local force, local offset, scale by mass): XMC's arguments.
+                    N.Call("APPLY_FORCE_TO_PED", ped, 1, 0f, force, 0f, 0f, 0f, 0f, 1, 1, 1, 1);
+                    act = "run push " + U.F(force, "0.0");
+                }
             }
-            else if (runPeak > 0f)
+            else if (runActive)
             {
-                if (abilityLogLeft > 0) { abilityLogLeft--; Log.Write("Super run: top speed " + U.F(runPeak, "0.0") + " m/s (normal sprint is about 7)"); }
-                runPeak = 0f;
+                runActive = false;
+                StopRunBoost(ped);
+                float secs = (now - runStartAt) / 1000f;
+                if (secs > 0.6f && abilityLogLeft > 0)
+                {
+                    Vector3 p = CharPos(ped);
+                    float dist = U.Len(U.V(p.X - runStartPos.X, p.Y - runStartPos.Y, 0f));
+                    abilityLogLeft--;
+                    Log.Write("Super run [" + RunMethodNames[runMethod].ToLowerInvariant() + "]: " + U.F(dist / secs, "0.0") + " m/s average over " + U.F(secs, "0.0") + " s (a normal sprint is about 7)");
+                }
+            }
+            else if (superRun && sprinting && stick > 0.3f && !runWhyLogged && (!onFoot || inAir))
+            {
+                runWhyLogged = true;
+                Log.Write("Super run: sprinting, but the game says on foot " + YN(onFoot) + ", in the air " + YN(inAir));
             }
 
-            // Super jump: push up every frame while jump is held, for up to JumpBoostMs after the press.
-            if (superJump && onFoot)
+            // ---- Super Jump ----------------------------------------------------------
+            float height = 1.2f * jumpBoost;
+            if (superJump && jumpPressed)
             {
-                if (jumpPressed && !inAir)
+                if (onFoot && !inAir && !jumpActive)
                 {
-                    jumpUntil = now + JumpBoostMs;
-                    jumpStartZ = jumpPeakZ = ped.Position.Z;
-                    jumpTracking = true;
+                    Vector3 p = CharPos(ped);
+                    jumpActive = jumpRising = true;
+                    jumpStartAt = now;
+                    jumpStartZ = jumpPeakZ = jumpLastSetZ = p.Z;
+                    jumpBlockedFrames = 0;
                     if (!jumpInvincible && !godMode) { N.Call("SET_CHAR_INVINCIBLE", ped, true); jumpInvincible = true; }
                 }
-                if (jumpUntil != 0 && now < jumpUntil && jumpHeld)
+                else if (abilityLogLeft > 0 && !jumpActive)
                 {
-                    float force = jumpBoost * f30;
-                    N.Call("APPLY_FORCE_TO_PED", ped, 1, 0f, 0f, force, 0f, 0f, 0f, 1, 1, 1, 1);
-                    act = (act == null ? "" : act + ", ") + "jump push " + U.F(force, "0.0");
+                    abilityLogLeft--;
+                    Log.Write("Super jump: jump pressed, but the game says on foot " + YN(onFoot) + ", in the air " + YN(inAir));
                 }
-                else if (jumpUntil != 0 && (now >= jumpUntil || !jumpHeld)) jumpUntil = 0;
             }
-            if (jumpTracking)
+            if (jumpActive)
             {
-                float z = ped.Position.Z;
-                if (z > jumpPeakZ) jumpPeakZ = z;
+                Vector3 p = CharPos(ped);
+                if (p.Z > jumpPeakZ) jumpPeakZ = p.Z;
+                float climbed = p.Z - jumpStartZ;
+                float reached = jumpMethod == 0 ? jumpLastSetZ - jumpStartZ : climbed;   // Lift goes by its own path
+                // Stop trying after the time the climb should take, plus a margin.
+                float riseSecs = jumpMethod == 1 ? (float)Math.Sqrt(2f * height / Gravity) : height / LiftSpeed;
+                int maxMs = (int)(riseSecs * 1000f) + 500;
+                bool wasRising = jumpRising;
+                if (jumpRising && (reached >= height - 0.01f || now - jumpStartAt > maxMs)) jumpRising = false;
+                if (wasRising && !jumpRising && jumpMethod == 0)
+                {
+                    // One velocity write at the top: drop the fall speed gravity built up while lifting, and
+                    // if you're pushing the stick, a forward kick so you carry on in an arc.
+                    Vector3 d = MoveDir(ped);
+                    float kx = 0f, ky = 0f;
+                    if (stick > 0.3f) { kx = d.X * JumpDrift; ky = d.Y * JumpDrift; }
+                    else
+                    {
+                        Pointer vx = new Pointer(typeof(float)), vy = new Pointer(typeof(float)), vz = new Pointer(typeof(float));
+                        if (N.Call("GET_CHAR_VELOCITY", ped, vx, vy, vz)) { kx = (float)vx; ky = (float)vy; }
+                    }
+                    N.Call("SET_CHAR_VELOCITY", ped, kx, ky, stick > 0.3f ? 1f : 0f);
+                }
+                if (jumpRising)
+                {
+                    if (jumpMethod == 0)
+                    {
+                        // Something above you, or the game keeps pulling you back: give up after a few frames.
+                        // Allow for the fall gravity adds between frames (more as the lift goes on, and at low fps).
+                        float slack = 0.3f + Gravity * ((now - jumpStartAt) / 1000f) * realDt;
+                        if (p.Z < jumpLastSetZ - slack) jumpBlockedFrames++; else jumpBlockedFrames = 0;
+                        if (jumpBlockedFrames >= 4)
+                        {
+                            jumpRising = false;
+                            Log.Write("Super jump [lift]: the game kept pulling you back down (something above you?)");
+                        }
+                        else
+                        {
+                            // Up our own path from where we last put you, not from where gravity has dragged you
+                            // since, so the height doesn't depend on whether a teleport clears the fall speed.
+                            jumpLastSetZ += Math.Min(height - (jumpLastSetZ - jumpStartZ), LiftSpeed * realDt);
+                            float hx = p.X, hy = p.Y;
+                            if (stick > 0.3f)
+                            {
+                                // Pushing the stick: drift forward as you rise, like a real jump.
+                                Vector3 d = MoveDir(ped);
+                                hx += d.X * JumpDrift * realDt; hy += d.Y * JumpDrift * realDt;
+                            }
+                            N.Call("SET_CHAR_COORDINATES_NO_OFFSET", ped, hx, hy, jumpLastSetZ);
+                            act = (act == null ? "" : act + ", ") + "jump lift " + U.F(climbed, "0.0") + "/" + U.F(height, "0.0") + " m";
+                        }
+                    }
+                    else if (jumpMethod == 1)
+                    {
+                        // Keep your sideways momentum and set the climb rate (TORISOUP re-applies it every tick
+                        // while rising). sqrt(2 g h) is the speed that coasts up exactly the height still to go,
+                        // so letting go at the top doesn't throw you higher than Jump Boost says.
+                        Pointer vx = new Pointer(typeof(float)), vy = new Pointer(typeof(float)), vz = new Pointer(typeof(float));
+                        float hx = 0f, hy = 0f;
+                        if (N.Call("GET_CHAR_VELOCITY", ped, vx, vy, vz)) { hx = (float)vx; hy = (float)vy; }
+                        float climb = Math.Max(3f, (float)Math.Sqrt(2f * Gravity * Math.Max(0f, height - climbed)));
+                        N.Call("SET_CHAR_VELOCITY", ped, hx, hy, climb);
+                        act = (act == null ? "" : act + ", ") + "jump launch " + U.F(climb, "0.0") + " m/s, " + U.F(climbed, "0.0") + "/" + U.F(height, "0.0") + " m";
+                    }
+                    else if (now - jumpStartAt < 600)
+                    {
+                        float force = jumpBoost * U.Clamp(realDt * 30f, 0.25f, 3f);
+                        N.Call("APPLY_FORCE_TO_PED", ped, 1, 0f, 0f, force, 0f, 0f, 0f, 1, 1, 1, 1);
+                        act = (act == null ? "" : act + ", ") + "jump push " + U.F(force, "0.0");
+                    }
+                }
             }
 
             // Invincibility (and the height log) ends a moment after landing.
-            if (inAir || jumpUntil != 0) lastAirborne = now;
+            if (inAir || jumpRising) lastAirborne = now;
             else if (now - lastAirborne > 1200)
             {
-                if (jumpTracking)
+                if (jumpActive)
                 {
-                    jumpTracking = false;
-                    if (abilityLogLeft > 0) { abilityLogLeft--; Log.Write("Super jump: rose " + U.F(jumpPeakZ - jumpStartZ, "0.0") + " m (a normal jump is about 1)"); }
+                    jumpActive = false;
+                    if (abilityLogLeft > 0)
+                    {
+                        abilityLogLeft--;
+                        Log.Write("Super jump [" + JumpMethodNames[jumpMethod].ToLowerInvariant() + "]: rose " + U.F(jumpPeakZ - jumpStartZ, "0.0") + " m (a normal jump is about 1)");
+                    }
                 }
                 EndJumpInvincibility(ped);
             }
 
             if (liveDebug && CurrentVehicle() == null)
                 footDebug = "FOOT  on foot " + YN(onFoot) + "  air " + YN(inAir) + "  stick " + U.F(stick, "0.00")
-                          + "  run btn " + YN(runHeld) + "  jump btn " + YN(jumpHeld) + "  speed " + U.F(N.OutFloat("GET_CHAR_SPEED", 0f, ped), "0.0")
-                          + "  frame " + U.F(realDt * 1000f, "0") + " ms  " + (act ?? "-");
+                          + "  sprint " + YN(sprinting) + "  game speed " + U.F(gameSpeed, "0.0")
+                          + "  run " + RunMethodNames[runMethod].ToLowerInvariant() + " / jump " + JumpMethodNames[jumpMethod].ToLowerInvariant()
+                          + "  " + (act ?? "-");
         }
 
         private void RunPlayerSlow(Ped ped)

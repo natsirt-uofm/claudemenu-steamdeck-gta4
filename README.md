@@ -4,7 +4,7 @@ ClaudeMenu is a trainer for GTA IV that you drive completely from a gamepad: ope
 
 It reads the controller directly through XInput instead of the game's key bindings. Under Proton, Steam Input shows the Deck's controls to the game as an Xbox 360 pad, so button combos work the same whatever the in-game control settings are.
 
-**Status (1.4.0):** 1.1.6 was tested on a real Steam Deck (SteamOS, Proton 8.0-103, GTA IV 1.0.8.0, ScriptHook 0.5.1, ScriptHookDotNet 1.7.2.0 BETA): the menu loads, draws and responds to the controller, and walking is normal. 1.2.0 brought back **Super Run** and **Super Jump**, reworked the **car multipliers**, made the menu translucent and kept the camera usable while the menu is open. 1.3.0 added a **Chaos** section with world-changing modes, headed by a Carmageddon-style **Car Magnet**, and 1.4.0 adds a built-in **Tsunami**. All of this uses techniques from working GTA IV mods (see [Credits](#credits-and-references)). **None of the 1.2.0–1.4.0 changes have been tested on the Deck yet.** They're all off by default, and **Live Debug** (Misc or Performance) shows what the movement features see each frame. If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
+**Status (1.4.1):** 1.1.6 was tested on a real Steam Deck (SteamOS, Proton 8.0-103, GTA IV 1.0.8.0, ScriptHook 0.5.1, ScriptHookDotNet 1.7.2.0 BETA): the menu loads, draws and responds to the controller, and walking is normal. 1.2.0 brought back **Super Run** and **Super Jump**, reworked the **car multipliers**, made the menu translucent and kept the camera usable while the menu is open. 1.3.0 added a **Chaos** section with world-changing modes, headed by a Carmageddon-style **Car Magnet**, 1.4.0 added a built-in **Tsunami**, and 1.4.1 reworks **Super Run** and **Super Jump** after the Deck test showed they did nothing (three methods each now; see below). All of this uses techniques from working GTA IV mods (see [Credits](#credits-and-references)). **Apart from that Super Run / Super Jump report, the 1.2.0–1.4.1 changes haven't been tested on the Deck yet.** They're all off by default, and **Live Debug** (Misc or Performance) shows what the movement features see each frame. If something misbehaves, `scripts/ClaudeMenu.log` says which game function failed.
 
 ## Controls
 
@@ -18,8 +18,8 @@ It reads the controller directly through XInput instead of the game's key bindin
 | Change value | D-pad left / right | Left / Right |
 | Back | B | Backspace |
 | **Nitro** (while driving; off by default) | **L3** (click the left stick) | |
-| **Super Run** (when on) | hold **A** (sprint) while moving | |
-| **Super Jump** (when on) | hold **X** (jump) | |
+| **Super Run** (when on) | sprint (**A**, held or tapped) while moving | |
+| **Super Jump** (when on) | tap **X** (jump); push the stick to jump forward | |
 | Look around while the menu is open | right stick | |
 
 You can rebind the open, close and nitro buttons in-game under **Settings**: choose one, hold the new button(s), then let go. If you moved sprint or jump in Steam Input or the game, tell ClaudeMenu under **Settings → Set Sprint Button / Set Jump Button**. You can also change all of them in `ClaudeMenu.ini`. By default your character is frozen while the menu is open, so menu buttons don't also make Niko jump, sprint or open the phone. The right stick still turns the camera (**Settings → Camera Moves While Open**). You can turn the freeze off in Settings.
@@ -28,7 +28,7 @@ You can rebind the open, close and nitro buttons in-game under **Settings**: cho
 
 ## Features
 
-- **Player:** god mode, refill health and armour, auto heal, keep armour full, kill player; never wanted, set wanted level, police ignore you, everyone ignores you; **Super Run** and **Super Jump** (experimental, adjustable boost), unlimited sprint, no ragdoll, ragdoll now, never fall off bike, can't be dragged out, seatbelt; change player model (story characters, police, gangs, civilians); cash (see it, add, remove, set to $0)
+- **Player:** god mode, refill health and armour, auto heal, keep armour full, kill player; never wanted, set wanted level, police ignore you, everyone ignores you; **Super Run** and **Super Jump** (experimental, adjustable boost, three methods each), unlimited sprint, no ragdoll, ragdoll now, never fall off bike, can't be dragged out, seatbelt; change player model (story characters, police, gangs, civilians); cash (see it, add, remove, set to $0)
 - **Vehicles:**
   - **Spawner:** 11 categories (about 150 models, including EFLC ones), plus a controller-friendly **search** (pick letters with the D-pad). Models missing from your episode are marked and skipped safely. Spawn driving it or parked in front of you, replace your last spawn, delete the last or all spawned vehicles.
   - **Customs garage:** primary, secondary, specular and trim colour from GTA IV's full 137-colour palette with names and swatches, previewed live as you scroll (A keeps it, B puts the old colour back); random paint; extras 1–9 on/off; livery; dirt level; open, close or break off each door, the hood and trunk; smash or remove windows; repair, wash, burst/fix tyres, bulletproof tyres; engine off; bulletproof, fireproof, explosion-, collision- and melee-proof.
@@ -78,36 +78,32 @@ Nothing is applied while the menu is open, in the air, while reversing or nearly
 
 Limits: it changes the car's speed along its nose, so gear ratios, engine sound and wheelspin don't change the way a real handling edit would. It works on cars and bikes (not helicopters or boats). It reads the throttle from the controller triggers, or W/S/Space on a keyboard without a controller. `ForceScale` under `[Performance]` in `ClaudeMenu.ini` (1.0 by default) scales every change. The first eight boosts after you open the Performance menu are logged as `Boost smooth: 20.00 -> 20.07 (power) m/s`.
 
-### How Super Run and Super Jump work (experimental, untested on the Deck)
+### How Super Run and Super Jump work (experimental)
 
-Deck tests showed `SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER` and on-ground `SET_CHAR_VELOCITY` freeze walking, and a single in-air velocity write is ignored. So neither is used. Instead, like the **XMC mod menu**, ClaudeMenu adds a small push with `APPLY_FORCE_TO_PED(player, type 1, …, component 1, local, local, scaled by mass)` every frame **while you hold the button**. It adds to the game's own movement instead of overwriting it.
+What moves the player in GTA IV on PC isn't documented, and the Deck has ruled several things out:
 
-- **Super Run:** a forward push while you hold sprint (A) and move the left stick, on the ground. **Run Boost** 1–10 (5 is XMC's value).
-- **Super Jump:** an upward push for up to 0.6 s after you press jump (X), while you keep holding it. **Jump Boost** 1–10 (5 is XMC's value). You're invincible from take-off until a moment after you land, so the fall doesn't hurt.
+- `SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER` and writing the player's velocity on the ground froze walking.
+- A single velocity write in the air was ignored.
+- 1.4.0's small per-frame `APPLY_FORCE_TO_PED` push (the XMC trainer's method) did nothing.
 
-Both are off by default and do nothing unless you hold the button. Neither does anything while the menu is open or while you're holding LB+RB (the menu combo). Each sprint and jump is logged, like `Super run: top speed 11.2 m/s (normal sprint is about 7)` and `Super jump: rose 4.5 m (a normal jump is about 1)`. That shows whether the push works on your setup.
+So 1.4.1 gives each feature **three methods** (Player → Run Method / Jump Method). The defaults are the ones most likely to visibly work:
 
-### How Chaos works
+| | Method | How |
+|---|---|---|
+| Super Run | **Step** (default) | Small position steps (`SET_CHAR_COORDINATES_NO_OFFSET`) along the way you're running, every frame. Teleports demonstrably work on the Deck. Steps only happen while the game itself has you moving faster than 2.5 m/s, so a wall stops them. Run Boost = extra m/s. |
+| | **Anim Speed** | `SET_CHAR_ALL_ANIMS_SPEED` while sprinting, set once when you start and once when you stop. The XMC trainer sets it on the player for its rapid fire; whether it also speeds up running is what this method tests. Run Boost 5 = 1.75× animations. |
+| | **Push** | XMC's per-frame `APPLY_FORCE_TO_PED` (what 1.4.0 did). |
+| Super Jump | **Lift** (default) | Raises you with `SET_CHAR_COORDINATES_NO_OFFSET` for a moment after you jump (the idea comes from MoveImprove's climb-up code). At the top it writes your velocity once: if you're pushing the stick, a forward kick so you land ahead of where you started; if not, it clears the fall speed built up on the way up. If the game keeps pulling you back down, it gives up after a few frames and logs that. |
+| | **Launch** | Sets your climb rate with `SET_CHAR_VELOCITY` every frame while rising, as TORISOUP's "let's fly" effect does for the player. The rate is the speed that coasts up exactly the height still to go, so letting go at the top doesn't throw you higher than Jump Boost says. |
+| | **Push** | XMC's `APPLY_FORCE_TO_PED` for 0.6 s (what 1.4.0 did, minus the need to hold the button). |
 
-Chaos borrows ideas and force sizes from two GTA IV chaos mods with public source. **ChaosIV** contributed Jumpy Vehicles, Earthquake, launches, coloured traffic, flee, everyone out and mass breakdown. **TORISOUP's Inferno "Parupunte"** contributed the repulsion field (ragdoll a person, then push), Crazy City (car speeds of ±30 every half second) and floaty cars. Both run on a 100 ms tick, and so does ClaudeMenu's Chaos. Car Magnet is ClaudeMenu's take on GTA V's Carmageddon mod: every car in range is pulled toward you, with a little lift so distant cars arc in.
+- **Super Jump just needs a tap** on jump (X). 1.4.0 only pushed while you held it, which a normal tap didn't do.
+- **Tapping sprint counts as sprinting.**
+- **Jump Boost** is about 1.2 m of height per point (5 = 6 m).
+- You're **invincible** from take-off until a moment after you land.
+- Neither does anything while the menu is open or while LB+RB are held.
 
-- **It never touches you or your vehicle.** Cars thrown at you can of course still hit you, so God Mode helps with Car Magnet.
-- **It skips mission characters and vehicles** (`IS_PED_A_MISSION_PED` / `IS_CAR_A_MISSION_CAR`), so story missions keep their cars and people. Cars created by scripts usually count as mission cars in GTA IV, so cars ClaudeMenu spawns for you are probably left alone too.
-- At most 40 cars and 30 people are affected per tick, within **Chaos Radius** of you. Black Hole's centre stays where you put it, 35 m ahead of you when you switch it on.
-- **Car Rain** loads models without freezing the game and keeps at most 20 rain cars, deleting the oldest. **Clean Up Rain Cars** removes them all.
-- **Riot** changes each rioter's own relationships (`SET_CHAR_RELATIONSHIP`), so switching it off undoes exactly that (`CLEAR_CHAR_RELATIONSHIP`). Invisible Traffic shows the cars again, Weather Roulette hands the weather back to the game, and Mad Drivers switches off.
-- **Stop All Chaos** does all of the above at once.
-
-**Tsunami.** GTA IV can't raise the sea from a script: there's no water-level native, and ScriptHookDotNet's memory helper is private, so a real flood would mean writing to unknown memory addresses. ClaudeMenu doesn't fake one. Instead it stages a storm-surge wave:
-
-1. **Warning (8 s):** it finds the real nearest sea by probing 16 directions with `GET_WATER_HEIGHT`. Water must show up at two distances, so ponds don't count. Then it switches to a thunderstorm and turns the wind to full with `FORCE_WIND(1.0)`, which also roughens the real ocean (Rockstar's scripts use 0–1 here). People near you run from the coast, and a countdown tells you where the wave is coming from.
-2. **The wave:** a straight front sweeps in from that sea and past you. In the 30 m behind the front, cars and people are lifted up to the wave height and carried toward the wave's speed, cars get tumbled, and Rockstar's car-wash water effects (`water_carwash_mist` / `_jets`) spray along the front. The controller rumbles as it gets close.
-3. **The flood behind it:** cars float a little and drift with a slow current.
-4. **After:** wind and weather go back to the game (`FORCE_WIND(-1)`, `RELEASE_WEATHER`).
-
-By default the wave flows around you and your car. Switch on **Wave Hits Me Too** to be swept away as well.
-
-Heavy combinations (Car Rain + Meteors + Riot at full strength) can push GTA IV hard on a Deck. Lower Chaos Strength or Radius if the frame rate drops.
+Every attempt is logged with the method and the result, for example `Super run [step]: 11.6 m/s average over 3.1 s (a normal sprint is about 7)` or `Super jump [lift]: rose 5.9 m (a normal jump is about 1)`. When nothing happens, the log says why, for example `Super jump: jump pressed, but the game says on foot N, in the air N`, `Super jump [lift]: the game kept pulling you back down (something above you?)` or `Super run [step]: the game has you at 1.1 m/s, so no steps (blocked, or not really running?)`.
 
 ### What GTA IV can't do (so ClaudeMenu doesn't pretend to)
 
@@ -116,7 +112,7 @@ Heavy combinations (Car Rain + Meteors + Riot at full strength) can push GTA IV 
 - **Gravity is on or off**: there's no low-gravity setting.
 - **The sea level can't be raised.** There's no water-level native and no safe way to change it from a script, so the Tsunami is a wave that carries cars and people, not a flooded city.
 - **Explosive hits** only work on people and vehicles you damage (IV has no bullet-impact native, so walls and the ground don't explode).
-- **No animation-speed fast run.** `SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER` freezes the walk cycle on the Deck (even at 1.0), and writing the player's velocity on the ground freezes it too. Super Run and Super Jump push instead (see above).
+- **No `SET_CHAR_MOVE_ANIM_SPEED_MULTIPLIER` fast run.** It freezes the walk cycle on the Deck (even at 1.0), and writing the player's velocity on the ground freezes it too. Super Run moves your position in small steps instead; its optional Anim Speed method uses a different function, `SET_CHAR_ALL_ANIMS_SPEED` (see above).
 - **Liveries** only exist on some models (taxis, police and a few others).
 - **Player models and vehicles** that aren't in the episode you're playing are reported as unavailable instead of loading.
 
@@ -289,7 +285,7 @@ These are the problems we hit on a real Deck, in the order we hit them.
 - **The performance multipliers do nothing.** Turn on **Live Debug** (Performance or Misc) and drive. The CAR line shows what ClaudeMenu sees: whether you're the driver, RT/LT, forward speed, frame time, and what it applied. If it says `driver N` or `tunable N`, it won't touch that vehicle. If RT stays at 0.00 while you press it, it isn't seeing the trigger. If it shows boosts (`smooth: 20.00 -> 20.07 (power)`) but the car doesn't feel faster, switch **Boost Method** to Pulses or Force, or raise `ForceScale` in `ClaudeMenu.ini`. The log also records the first boosts as `Boost smooth: …` lines.
 - **The car stops or won't pull away with a multiplier on.** Set **Boost Method** to Pulses or Force and tell us what Live Debug showed. Reset to Stock always gives you the normal car back.
 - **Nitro does nothing.** It's off by default: turn on Performance → Nitro. It also needs you driving a car or bike that's moving forward, with the nitro button (L3 by default) held. Rebind it under **Settings → Rebind Nitro Button**.
-- **Super Run / Super Jump do nothing.** Turn on **Live Debug** and check the FOOT line. `run btn` and `jump btn` should say Y while you hold sprint (A) and jump (X). If they don't, set your buttons under **Settings → Set Sprint Button / Set Jump Button**. If they do and it shows `run push` / `jump push` but nothing happens, raise **Run Boost / Jump Boost**. The log records each attempt (`Super run: top speed …`, `Super jump: rose … m`).
+- **Super Run / Super Jump do nothing.** Check `scripts/ClaudeMenu.log` for `Super run [...]` / `Super jump [...]` lines, which name the method and what it achieved. Then try the other methods: Player → **Run Method** (Step, Anim Speed, Push) and **Jump Method** (Lift, Launch, Push). Live Debug's FOOT line shows `sprint` / `game speed` and what was applied each frame. If `sprint` stays N while you hold A, set your sprint button under **Settings → Set Sprint Button** (likewise Set Jump Button). If running stutters with Step, switch to Anim Speed.
 - **Chaos is too much, or the frame rate drops.** Chaos → **Stop All Chaos** switches everything off. Then lower **Chaos Radius** / **Chaos Strength** before turning modes back on. The red CHAOS badge at the top of the screen shows what's still running.
 - **Rain cars are piling up.** Chaos → **Clean Up Rain Cars**.
 - **The tsunami came from a strange direction, or "No sea found nearby".** It uses the closest real water within 700 m. Inland, or if water isn't found, it comes from behind you. Set **Wave Comes From** to choose. **Stop Tsunami** ends it at once and gives the weather back.
@@ -331,9 +327,9 @@ These rules come from getting the script running on a real Deck. Please keep the
 
 ClaudeMenu borrows *techniques*, not code, from GTA IV mods whose source is public. Thanks to their authors:
 
-- **XMC mod menu** (EmmanuelU/xmc-mod-menu): super run and super jump with `APPLY_FORCE_TO_PED` while a button is held, the per-frame `SET_CAR_FORWARD_SPEED(speed × 1.02)` "NFS mode", and `SET_CAMERA_CONTROLS_DISABLED_WITH_PLAYER_CONTROLS` to keep the camera while the player is frozen.
-- **ChaosIV** (bountifulellie/ChaosIV) and **TORISOUP's GTA4 Inferno scripts** ("Parupunte"): how much force it takes to move peds and cars in IV, re-applying a ped's velocity over several ticks, collision proofing for falls, and most of the Chaos ideas: jumpy, floaty and crazy traffic, earthquake, repulsion, launches, flee, coloured traffic, mass breakdown. **GTA V's Carmageddon mod** inspired Car Magnet.
-- **LotsofEds' IV mods** (MoveImproveIV-SDK, IVMouseWheelThrottle): per-frame forces on the player's car, and reading forward speed from `GET_CAR_SPEED_VECTOR(…, true)`.
+- **XMC mod menu** (EmmanuelU/xmc-mod-menu): super run and super jump with `APPLY_FORCE_TO_PED` while a button is held (the Push methods), `SET_CHAR_ALL_ANIMS_SPEED` on the player (the Anim Speed run method), the per-frame `SET_CAR_FORWARD_SPEED(speed × 1.02)` "NFS mode", and `SET_CAMERA_CONTROLS_DISABLED_WITH_PLAYER_CONTROLS` to keep the camera while the player is frozen.
+- **ChaosIV** (bountifulellie/ChaosIV) and **TORISOUP's GTA4 Inferno scripts** ("Parupunte"): how much force it takes to move peds and cars in IV, re-applying a ped's velocity over several ticks (the Launch jump method), collision proofing for falls, and most of the Chaos ideas: jumpy, floaty and crazy traffic, earthquake, repulsion, launches, flee, coloured traffic, mass breakdown. **GTA V's Carmageddon mod** inspired Car Magnet.
+- **LotsofEds' IV mods** (MoveImproveIV-SDK, IVMouseWheelThrottle): per-frame forces on the player's car, reading forward speed from `GET_CAR_SPEED_VECTOR(…, true)`, and the climb-up code, which lifts the player with `SET_CHAR_COORDINATES` (the idea behind the Lift jump method).
 - **Rockstar's decompiled mission scripts** (0x52617665/GTAIVMissionScripts): how the game itself calls `APPLY_FORCE_TO_CAR`, `GET_CAR_SPEED_VECTOR`, `FORCE_WIND` and `SHAKE_PAD`, and the car wash's water effects and how it starts and stops them (`START_PTFX` / `STOP_PTFX`), which the Tsunami's spray uses.
 - **HappinessMP's native docs** (HappinessMP/natives): the real argument names of `APPLY_FORCE_TO_CAR` / `APPLY_FORCE_TO_PED` (force, offset, component, local force, local offset, scale by mass).
 - **ScriptHookDotNet** (Tomasak/gta4_scripthookdotnet) and **FusionFix**'s native table: the API and native signatures every call here is checked against.
