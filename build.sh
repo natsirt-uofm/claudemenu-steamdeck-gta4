@@ -8,8 +8,12 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
 if [[ "${1:-}" == "--check" ]]; then
-  mcs -langversion:4 -target:library -out:"$out/ScriptHookDotNet.dll" tools/shdn-stub/ScriptHookDotNetStub.cs
-  mcs -langversion:4 -warnaserror -target:library -r:"$out/ScriptHookDotNet.dll" -out:"$out/ClaudeMenu.net.dll" scripts/ClaudeMenu.cs
+  mcs -langversion:4 -target:library -r:System.Drawing.dll -out:"$out/ScriptHookDotNet.dll" tools/shdn-stub/ScriptHookDotNetStub.cs
+  # -noconfig + these references = what ScriptHookDotNet's in-game compiler gives a
+  # loose .cs file. In particular there is no System.Core (no HashSet, no LINQ).
+  mcs -noconfig -langversion:4 -warnaserror -target:library \
+      -r:System.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll -r:System.Xml.dll \
+      -r:"$out/ScriptHookDotNet.dll" -out:"$out/ClaudeMenu.net.dll" scripts/ClaudeMenu.cs
   echo "ClaudeMenu.cs compiles as C# 4 (stub check only)."
   exit 0
 fi
